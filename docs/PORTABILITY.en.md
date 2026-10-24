@@ -6,7 +6,7 @@ This is a staged design, **not a declaration of expanded EFI support**. The pres
 
 ## Separate host portability from GPU support
 
-An ASUS motherboard or AMD CPU is not inherently the unlock algorithm. They currently appear in hardcoded platform and display assumptions. Intel hosts, other motherboard vendors and additional display topologies can be investigated independently of the GPU transaction. AMD Radeon and Intel discrete targets would need separate unlock implementations; this repository only contains the NVIDIA GA102 transaction used for the RTX 3090 case.
+An ASUS motherboard or AMD CPU is not inherently the unlock algorithm. They currently appear in hardcoded platform and display assumptions. Other Intel hosts, motherboard vendors and display topologies can be investigated independently of the GPU transaction. AMD Radeon and Intel discrete targets would need separate unlock implementations; this repository contains reviewed NVIDIA GA102 and GA104 profiles, including the [single-machine RTX 3060 Ti Windows case](WINDOWS-RTX3060TI.en.md).
 
 | Layer | Current binding | Proposed direction | Required evidence |
 |---|---|---|---|
