@@ -38,9 +38,11 @@ Proceed only if `U:` is the prepared **separate** ESP and `IsSystem=False`. The 
 
 ## Get the source and measure a baseline
 
-Open the checkout containing this guide and `windows/Install-RTX3060Ti.ps1`; an older GitHub default branch may not contain the installer yet. From the checkout root, run:
+Clone the published source branch, then run these commands from the checkout root:
 
 ```powershell
+git clone --branch codex/rtx3060ti-windows https://github.com/GinzaTech/Windows-GPU-UNLOCK.git
+Set-Location .\Windows-GPU-UNLOCK
 if (-not (Test-Path .\windows\Install-RTX3060Ti.ps1)) {
   throw 'This checkout does not contain the RTX 3060 Ti installer.'
 }

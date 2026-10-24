@@ -38,9 +38,11 @@ Chỉ tiếp tục khi `U:` đúng là ESP **riêng** đã chuẩn bị, `IsSyst
 
 ## Lấy mã nguồn, chuẩn bị mốc trước
 
-Mở bản checkout chứa chính tài liệu này và `windows/Install-RTX3060Ti.ps1`; nhánh mặc định cũ trên GitHub có thể chưa có bộ cài. Từ thư mục gốc của checkout, chạy:
+Clone nhánh mã nguồn đã xuất bản, rồi chạy các lệnh sau từ thư mục gốc của checkout:
 
 ```powershell
+git clone --branch codex/rtx3060ti-windows https://github.com/GinzaTech/Windows-GPU-UNLOCK.git
+Set-Location .\Windows-GPU-UNLOCK
 if (-not (Test-Path .\windows\Install-RTX3060Ti.ps1)) {
   throw 'Checkout này chưa có bộ cài RTX 3060 Ti.'
 }
