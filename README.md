@@ -2,10 +2,22 @@
 
 **English** | [한국어](README.ko.md)
 
-Experimental UEFI unlock and direct Windows handoff for one documented **RTX 3090
-Founders Edition / ASUS BIOS 3057** system. **v0.3.1 is a source-only pre-release**:
-build the internal EFI for your own partition GUIDs. Firmware assets and private,
-partition-specific EFI binaries are not bundled with this release.
+Experimental UEFI unlock and direct Windows handoff for reviewed, machine-specific
+profiles. The source-only release does not include firmware assets or private,
+partition-specific EFI binaries. Build the EFI for your own partition GUIDs.
+
+**RTX 3060 Ti Windows build:** one guarded F8 unlock and Windows handoff succeeded
+on ASUS TUF GAMING Z690-PLUS WIFI D4 BIOS 2602 with card `10DE:2489 / 1043:8827`.
+The new [automated build/install guide in English](docs/WINDOWS-RTX3060TI.en.md)
+and [Vietnamese](docs/WINDOWS-RTX3060TI.vi.md) explain the supported profile,
+local assets, F8 test, and recovery. See the [English performance report](docs/WINDOWS-RTX3060TI-RESULTS.en.md)
+or [Vietnamese report](docs/WINDOWS-RTX3060TI-RESULTS.vi.md) for the controlled
+CUDA before/after measurements. Other 3060 Ti machines can run the read-only
+compatibility plan, but cannot install this exact profile without separate
+hardware validation.
+
+The following sections describe the original **RTX 3090 Founders Edition / ASUS
+BIOS 3057** path. v0.3.1 is the earlier source-only pre-release for that path.
 
 On October 24, 2026, the system completed an internal **headless unlock** with all
 monitors on the RTX: one active RTX GOP before release, zero physical GOPs afterward,
@@ -19,7 +31,7 @@ the same system; no new performance benchmark was run for this build.
 
 This is one machine and boot, not general RTX 3090 support. The Ryzen 7 7800X3D
 **has an iGPU**; the experiment used no active AMD GOP. CPUs without an iGPU,
-Intel hosts, other cards and other BIOS versions remain unverified.
+Other Intel hosts, cards and BIOS versions remain unverified for this RTX 3090 path.
 Read [compatibility](docs/COMPATIBILITY.en.md) first.
 
 ## Choose the correct boot path

@@ -3,7 +3,14 @@
 #include <Uefi.h>
 #include <Protocol/DevicePath.h>
 
+#ifdef GU_DIAGNOSTIC_SAME_ESP
+#ifndef GU_DIAGNOSTIC_ONLY
+#error Same-ESP boot is restricted to the read-only diagnostic
+#endif
+#include "diagnostic-config.h" /* Generated for this PC by build-diagnostic.ps1. */
+#else
 #include "platform-config.h" /* Generated locally by Configure.ps1. */
+#endif
 static const EFI_GUID GuInternalPartition = GU_INTERNAL_PARTITION_INITIALIZER;
 static const EFI_GUID GuWindowsPartition = GU_WINDOWS_PARTITION_INITIALIZER;
 

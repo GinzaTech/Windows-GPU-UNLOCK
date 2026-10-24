@@ -1,0 +1,16 @@
+[
+  {
+    "Name": "cuda_cudart",
+    "Version": "12.6.37",
+    "URL": "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-12.6.37-archive.zip",
+    "Bytes": 2512085,
+    "SHA256": "c66badb16921c4acb7abc38f211d530c2f290bd52c2cbdb5fb12095dc6eab0a9"
+  },
+  {
+    "Name": "libcublas",
+    "Version": "12.6.0.22",
+    "URL": "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.6.0.22-archive.zip",
+    "Bytes": 404037803,
+    "SHA256": "4f38ba0ab036296bcc48727cc3ed27e633911c0fc5dccb60d5131657b1a58002"
+  }
+]

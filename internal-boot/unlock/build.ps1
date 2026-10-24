@@ -8,7 +8,7 @@ param(
  [switch]$AutomaticBoot,
  [switch]$HeadlessResearch,
  [ValidateSet('original03100062','observed03000062','entryLatchedSs1Preserve','entryLatchedSs1Full')][string]$StockProfile,
- [ValidateSet('b650m-3090fe','b660m-3070ti')][string]$HardwareProfile='b650m-3090fe'
+ [ValidateSet('b650m-3090fe','b660m-3070ti','z690-3060ti')][string]$HardwareProfile='b650m-3090fe'
 )
 # Reviewed single-machine profiles; mirrors internal-boot/unlock/machine-profile.h.
 # A profile is fixed provenance: it selects constants compiled into the EFI,
@@ -16,6 +16,7 @@ param(
 $hwTable=@{
  'b650m-3090fe'=[ordered]@{Define='-DGU_PROFILE_B650M_3090FE';Name='ASUS-TUF-B650M-PLUS-WIFI-3057-RTX3090-FE';TargetPci='220410de';Subsystem='145410de';Chip='0xb72000a1';Prom='8ea297373e9e5d3600ff41ad9fae88f2d14c98c017d100669f7333981da673b4';Memory='0x6000';HeadlessOnly=$false}
  'b660m-3070ti'=[ordered]@{Define='-DGU_PROFILE_B660M_3070TI';Name='ASUS-TUF-GAMING-B660M-E-D4-4003-RTX3070TI';TargetPci='248210de';Subsystem='50521462';Chip='0xb74000a1';Prom='f429aa1d5f0f18d11ed9a19503683a674fe3541ae77e959df8e732652c2b4df0';Memory='0x2000';HeadlessOnly=$true}
+ 'z690-3060ti'=[ordered]@{Define='-DGU_PROFILE_Z690_3060TI';Name='ASUS-TUF-GAMING-Z690-PLUS-WIFI-D4-2602-RTX3060TI';TargetPci='248910de';Subsystem='88271043';Chip='0xb74000a1';Prom='6a124e5beccf659b1685ef294bc19a4f33fdfdf0fbd7eb69eff4bac9f129eb77';Memory='0x2000';HeadlessOnly=$true}
 }
 $hw=$hwTable[$HardwareProfile]
 $ErrorActionPreference='Stop'
@@ -53,10 +54,11 @@ try {
  [ordered]@{BuiltUtc=[DateTime]::UtcNow.ToString('o');HardwareProfile=$hw.Name;TargetPci=$hw.TargetPci;Subsystem=$hw.Subsystem;
   Mode=$(if($HeadlessResearch){'headless-research-automatic-internal-exact-card-unlock'}elseif($AutomaticBoot){'automatic-internal-exact-card-unlock'}elseif($ExperimentalUnlock){'experimental-exact-card-manual-unlock'}else{'diagnostic-preflight-only'});
   CanArm=[bool]$ExperimentalUnlock;Defines=$defines;ManualConfirmation=$(if($AutomaticBoot){'none; Esc within 3 seconds cancels'}else{'U once; Esc or 30-second timeout cancels'});
-  StockProfile=$(if($ExperimentalUnlock){$StockProfile}else{$null});ColdChipExpected=$hw.Chip;ColdSS0Expected=$(if($StockProfile -like 'entryLatchedSs1*'){'first fully validated cold entry; immutable'}elseif($ExperimentalUnlock){if($StockProfile -eq 'original03100062'){'0x03100062'}else{'0x03000062'}}else{'unknown'});ColdSS1Expected=$(if($StockProfile -like 'entryLatchedSs1*'){'first fully validated cold entry <= 0xf; immutable'}else{'0x6'});
+  StockProfile=$(if($ExperimentalUnlock){$StockProfile}else{$null});ColdChipExpected=$hw.Chip;ColdSS0Expected=$(if($HardwareProfile -eq 'z690-3060ti'){'0x54372112 or 0x54372012; exact allowlist'}elseif($StockProfile -like 'entryLatchedSs1*'){'first fully validated cold entry; immutable'}elseif($ExperimentalUnlock){if($StockProfile -eq 'original03100062'){'0x03100062'}else{'0x03000062'}}else{'unknown'});ColdSS1Expected=$(if($HardwareProfile -eq 'z690-3060ti'){'0x4'}elseif($StockProfile -like 'entryLatchedSs1*'){'first fully validated cold entry <= 0xf; immutable'}else{'0x6'});
   SS0Target='0x88888888';SS1Target=$(if($StockProfile -eq 'entryLatchedSs1Preserve'){'preserve entry; no SS1 writes'}elseif($StockProfile -eq 'entryLatchedSs1Full'){'0x8; one guarded write'}elseif($ExperimentalUnlock){'0x8'}else{'no writes'});
-  OriginalBaselineCapture='G:/RTX3090-PREFLIGHT/RUN00/REPORT.TXT';
-  StockProfileSource=$(if($StockProfile -like 'entryLatchedSs1*'){'Explicit immutable validated entry latch; no fixed stock selector assumption'}elseif($StockProfile -eq 'observed03000062'){'Explicit observed03000062 experiment selection; original baseline capture does not evidence this SS0'}elseif($ExperimentalUnlock){'OriginalBaselineCapture'}else{'preflight has no selected stock profile'});
+  OriginalBaselineCapture=$(if($HardwareProfile -eq 'z690-3060ti'){'research/results/rtx3060ti-diagnostic/20261024T165448Z-09aef816/DIAG00.TXT'}else{'G:/RTX3090-PREFLIGHT/RUN00/REPORT.TXT'});
+  ObservedColdSelectors=$(if($HardwareProfile -eq 'z690-3060ti'){'SS0=0x54372112 in DIAG00/01; SS0=0x54372012 in DIAG02 and HLS000004; SS1=0x4; exact live latch required; 0x04500056 excluded'}else{$null});
+  StockProfileSource=$(if($HardwareProfile -eq 'z690-3060ti'){'Exact two-value cold SS0 allowlist from DIAG00/01, DIAG02 and HLS000004; live entry latch remains immutable'}elseif($StockProfile -like 'entryLatchedSs1*'){'Explicit immutable validated entry latch; no fixed stock selector assumption'}elseif($StockProfile -eq 'observed03000062'){'Explicit observed03000062 experiment selection; original baseline capture does not evidence this SS0'}elseif($ExperimentalUnlock){'OriginalBaselineCapture'}else{'preflight has no selected stock profile'});
   PromSha256=$hw.Prom;
   DeviceMemorySize=$hw.Memory;HardwareTested=$false;
   EfiSha256=(Get-FileHash -LiteralPath "$out/$name.EFI" -Algorithm SHA256).Hash;

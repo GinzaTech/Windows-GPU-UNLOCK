@@ -3,17 +3,18 @@
  * Reviewed single-machine profiles. Every write-enabled build compiles for
  * exactly one profile: all hardware identities, display topology and driver
  * fingerprints below are immutable, build-time selected and never read from
- * a user-editable file. Select with -DGU_PROFILE_B650M_3090FE or
- * -DGU_PROFILE_B660M_3070TI; the default is the originally verified machine.
+ * a user-editable file. Select with -DGU_PROFILE_B650M_3090FE,
+ * -DGU_PROFILE_B660M_3070TI or -DGU_PROFILE_Z690_3060TI; the default is the
+ * originally verified machine.
  * Adding a profile here is never sufficient for support: each entry needs
  * its own hardware evidence (see docs/PORTABILITY.en.md stage 4).
  */
 #pragma once
 
-#if defined(GU_PROFILE_B650M_3090FE) && defined(GU_PROFILE_B660M_3070TI)
+#if (defined(GU_PROFILE_B650M_3090FE) + defined(GU_PROFILE_B660M_3070TI) + defined(GU_PROFILE_Z690_3060TI)) > 1
 #error Select exactly one machine profile
 #endif
-#if !defined(GU_PROFILE_B650M_3090FE) && !defined(GU_PROFILE_B660M_3070TI)
+#if !defined(GU_PROFILE_B650M_3090FE) && !defined(GU_PROFILE_B660M_3070TI) && !defined(GU_PROFILE_Z690_3060TI)
 #define GU_PROFILE_B650M_3090FE 1
 #endif
 
@@ -21,13 +22,69 @@
  * (aggregate GOP + text-out driver chain; verified on AMI boards without a
  * second display GPU). 0 = nvgop owns the console GOP on the target directly
  * (original verified B650M headless topology). */
-#if defined(GU_PROFILE_B660M_3070TI)
+#if defined(GU_PROFILE_B660M_3070TI) || defined(GU_PROFILE_Z690_3060TI)
 #define GU_CONSOLE_AGGREGATE 1
 #else
 #define GU_CONSOLE_AGGREGATE 0
 #endif
 
-#if defined(GU_PROFILE_B660M_3070TI)
+/* This Z690 firmware exposes three NVIDIA display child paths. */
+#if defined(GU_PROFILE_Z690_3060TI)
+#define GU_CONSOLE_MULTI_CHILD 1
+#else
+#define GU_CONSOLE_MULTI_CHILD 0
+#endif
+
+#if defined(GU_PROFILE_Z690_3060TI)
+
+/* ASUSTeK TUF GAMING Z690-PLUS WIFI D4 BIOS 2602, i7-14700K,
+ * ASUS RTX 3060 Ti (GA104). Read-only UEFI capture DIAG00, 2026-10-24.
+ * One guarded headless UEFI write run completed on this exact machine;
+ * see docs/WINDOWS-RTX3060TI-RESULTS.en.md for its limited evidence. */
+#define GU_PROFILE_NAME "ASUS-TUF-GAMING-Z690-PLUS-WIFI-D4-2602-RTX3060TI"
+#define GU_BOARD_ID 0x248910deU
+#define GU_BOARD_SUBSYSTEM 0x88271043U
+#define GU_BAR0_BASE 0x84000000ULL
+#define GU_BAR0_END 0x84ffffffULL
+#define GU_DEVICE_MEMORY_SIZE 0x2000U
+#define GU_CHIP_ID 0xb74000a1U
+/* DIAG00/01 measured 0x54372112. DIAG02 and HLS000004 independently
+ * measured 0x54372012 on this same card, with SS1=4 and the same PROM.
+ * These are the only two approved entry values; each run must latch and
+ * recheck its exact live pair before any GPU write. */
+#define GU_PROFILE_COLD_SS0 0x54372112U
+#define GU_PROFILE_COLD_SS0_ALTERNATE 0x54372012U
+#define GU_PROFILE_COLD_SS0_ALLOWED(value) \
+  ((value)==GU_PROFILE_COLD_SS0 || (value)==GU_PROFILE_COLD_SS0_ALTERNATE)
+#define GU_PROFILE_COLD_SS1 0x4U
+#define GU_PROM_SHA256 "6a124e5beccf659b1685ef294bc19a4f33fdfdf0fbd7eb69eff4bac9f129eb77"
+#define GU_ROOT_PORT_DEVICE 1U
+#define GU_ROOT_PORT_FUNCTION 0U
+/* Pathful NVIDIA GOP: ACPI root, Pci(1,0), Pci(0,0), ADR 0x80010300. */
+#define GU_RTX_PATH_BYTES \
+  2,1,12,0,0xd0,0x41,3,10,0,0,0,0,1,1,6,0,0,1,1,1,6,0,0,0,2,3,8,0,0,3,1,128,127,255,4,0
+/* Image sizes, DriverBinding versions/Stop offsets and immutable loaded .text
+ * hashes were measured from this machine's private UEFI diagnostic capture. */
+#define GU_CONSOLE_TEXT_SIZE 0x6a40U
+#define GU_CONSOLE_TEXT_STOP 0x104cU
+#define GU_CONSOLE_TEXT_VERSION 0x10U
+#define GU_CONSOLE_GFX_SIZE 0x3bc0U
+#define GU_CONSOLE_GFX_STOP 0xb2cU
+#define GU_CONSOLE_GFX_VERSION 0x10U
+#define GU_COMBO_SIZE 0x2160U
+#define GU_COMBO_STOP 0x88cU
+#define GU_COMBO_VERSION 0x11U
+#define GU_EDID_IMAGE_SIZE 0x9000U
+#define GU_EDID_STOP 0x14d4U
+#define GU_EDID_TEXT_BYTES 0x37daU
+#define GU_EDID_TEXT_SHA256 "a015d52f55fa6441414458e2b699ba2edcb53f03b001ac6367e45bcd908c418e"
+#define GU_NVGOP_VERSION 0x60010U
+#define GU_NVGOP_IMAGE_SIZE 0x26ae0U
+#define GU_NVGOP_STOP 0x678U
+#define GU_NVGOP_TEXT_BYTES 0x20d33U
+#define GU_NVGOP_TEXT_SHA256 "615b37a708b1894e18d7fa60cfcdacaa4d8b598863a10b8103d231a595847b2b"
+
+#elif defined(GU_PROFILE_B660M_3070TI)
 
 /* ASUSTeK TUF GAMING B660M-E D4 BIOS 4003, i7-12700F (no iGPU),
  * MSI RTX 3070 Ti (GA104): hardware-verified headless port. */

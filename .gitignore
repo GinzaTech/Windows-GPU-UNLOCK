@@ -23,6 +23,10 @@ compatibility-report*.json
 *.key
 *.pem
 internal-boot/boot/platform-config.h
+internal-boot/boot/diagnostic-config.h
+internal-boot/*-outcome.local.json
+internal-boot/*.local.json
+toolchains/
 internal-boot/boot/generated.h
 internal-boot/local-config.json
 internal-boot/install/state.json

@@ -50,6 +50,10 @@ try {
   $profileDefs=@('-DGU_EXPERIMENTAL_3090',(ProfileDefine $profile))
   $jobs+=@{Name="profile-lock-$profile";Sources=@('tests/test_profile_lock.c','port.c');Defines=$profileDefs;Args=@()}
  }
+ $jobs+=@{Name='profile-lock-z690-3060ti-captured';Sources=@('tests/test_profile_lock.c','port.c');
+  Defines=@('-DGU_EXPERIMENTAL_3090','-DGU_ENTRY_LATCHED_SS1_FULL','-DGU_PROFILE_Z690_3060TI','-DGU_TARGET_PCI_ID=0x248910deU');Args=@()}
+ $jobs+=@{Name='cold-z690-3060ti-captured';Sources=@('tests/test_z690_cold.c','app_io.c','ownership.c','format.c','sha256.c','checks.c')+$core;
+  Defines=@('-D__KERNEL__','-DGU_UEFI_PORT','-DGU_TARGET_PCI_ID=0x248910deU','-DGU_EXPERIMENTAL_3090','-DGU_ENTRY_LATCHED_SS1_FULL','-DGU_PROFILE_Z690_3060TI');Args=@()}
   if($WithLocalFixtures) {
    $jobs+=@{Name='sha';Sources=@('tests/test_sha256.c','sha256.c');Defines=@();Args=@($Prom)}
    $experimentalArgs=@($Prom,$ColdCapture)

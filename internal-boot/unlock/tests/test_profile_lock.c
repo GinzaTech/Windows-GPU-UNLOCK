@@ -20,10 +20,10 @@ static EFI_STATUS EFIAPI selector_write(EFI_PCI_IO_PROTOCOL *p,
   /* Model an error after a hardware effect as well as before one. */
   return o==SS1 && fail_ss1?EFI_DEVICE_ERROR:status;
 }
-static void selector_setup(UINT32 phase,UINT32 entry1) {
+static void selector_setup_with_ss0(UINT32 phase,UINT32 entry0,UINT32 entry1) {
   setup();ss1_callbacks=0;reenter_ss1=fail_ss1=FALSE;
   pci.Mem.Write=selector_write;Gu.prom_verified=TRUE;
-  registers[SS0/4]=0x03000062;registers[SS1/4]=entry1;
+  registers[SS0/4]=entry0;registers[SS1/4]=entry1;
   assert(GuLatchEntrySelectors(registers[SS0/4],entry1));
   assert(!EFI_ERROR(GuSavePci()));
   if(phase>=GU_SELECTOR_PHASE_SS0_WRITTEN) {
@@ -37,6 +37,9 @@ static void selector_setup(UINT32 phase,UINT32 entry1) {
     assert(GuSelectorPhase(GU_SELECTOR_PHASE_TARGET));
   }
 }
+static void selector_setup(UINT32 phase,UINT32 entry1) {
+  selector_setup_with_ss0(phase,0x03000062U,entry1);
+}
 static void fault_containment(void) {
   assert(Gu.fault);UINTN writes=fake.writes;
   GuWrite32(SS1,8);assert(fake.writes==writes);
@@ -45,6 +48,42 @@ static void fault_containment(void) {
   assert(!EFI_ERROR(GuClearMaster()) && !(config[4]&4) && Gu.fault);
 }
 static void selector_regressions(void) {
+#ifdef GU_PROFILE_Z690_3060TI
+  /* Both approved Z690 values must retain the exact live latch and phase gate. */
+  setup();
+  assert(GU_BOARD_ID==0x248910deU && GU_BOARD_SUBSYSTEM==0x88271043U);
+  assert(GU_BAR0_BASE==0x84000000ULL && GU_BAR0_END==0x84ffffffULL);
+  assert(GU_CHIP_ID==0xb74000a1U && GU_DEVICE_MEMORY_SIZE==0x2000U);
+  assert(!strcmp(GU_PROM_SHA256,"6a124e5beccf659b1685ef294bc19a4f33fdfdf0fbd7eb69eff4bac9f129eb77"));
+  assert(GuTargetConfig((UINT32 *)config,0,1,0,0));
+  *(UINT32 *)(config+0x2c)^=1;
+  assert(!GuTargetConfig((UINT32 *)config,0,1,0,0));
+  selector_setup_with_ss0(GU_SELECTOR_PHASE_ENTRY,0x54372112U,4);
+  UINT32 latched0=0,latched1=0;
+  assert(GuGetEntrySelectors(&latched0,&latched1) && latched0==0x54372112U && latched1==4);
+  assert(!GuLatchEntrySelectors(0x54372113U,4));
+  assert(!GuLatchEntrySelectors(0x54372112U,5));
+  assert(!Gu.fault && !fake.writes);
+  GuWrite32(SS0,0x88888888U);
+  assert(GuSelectorPhase(GU_SELECTOR_PHASE_SS0_WRITTEN));
+  assert(GuSelectorPhase(GU_SELECTOR_PHASE_SS1_WRITE));
+  GuWrite32(SS1,8);
+  assert(GuSelectorPhase(GU_SELECTOR_PHASE_TARGET));
+  assert(!Gu.fault && registers[SS0/4]==0x88888888U && registers[SS1/4]==8);
+  assert(ss1_callbacks==1 && fake.writes==2);
+  selector_setup_with_ss0(GU_SELECTOR_PHASE_ENTRY,GU_PROFILE_COLD_SS0_ALTERNATE,4);
+  assert(GuGetEntrySelectors(&latched0,&latched1) &&
+         latched0==GU_PROFILE_COLD_SS0_ALTERNATE && latched1==4);
+  assert(!GuLatchEntrySelectors(GU_PROFILE_COLD_SS0,4) && !fake.writes);
+  GuWrite32(SS0,0x88888888U);
+  assert(GuSelectorPhase(GU_SELECTOR_PHASE_SS0_WRITTEN));
+  assert(GuSelectorPhase(GU_SELECTOR_PHASE_SS1_WRITE));
+  GuWrite32(SS1,8);
+  assert(GuSelectorPhase(GU_SELECTOR_PHASE_TARGET));
+  assert(!Gu.fault && registers[SS0/4]==0x88888888U && registers[SS1/4]==8);
+  assert(ss1_callbacks==1 && fake.writes==2);
+  puts("PASS captured Z690 RTX3060Ti identity and both approved SS0/SS1=4 live-latched transitions");
+#endif
   setup();Gu.profile_verified=FALSE;Gu.armed=Gu.owned=FALSE;
   assert(!GuSelectorPhase(0xffffffffU) && Gu.fault && !fake.reads && !fake.writes);
   const UINT32 phases[]={GU_SELECTOR_PHASE_ENTRY,GU_SELECTOR_PHASE_SS0_WRITTEN,

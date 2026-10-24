@@ -1,7 +1,7 @@
 # GPL-2.0-only. Isolated exact-platform headless unlock wrapper/child package.
-param([string]$Clang='clang',[string]$LldLink='lld-link',[string]$Python='python',[ValidateSet('b650m-3090fe','b660m-3070ti')][string]$HardwareProfile='b650m-3090fe')
-$hwDefine=if($HardwareProfile -eq 'b660m-3070ti'){'-DGU_PROFILE_B660M_3070TI'}else{'-DGU_PROFILE_B650M_3090FE'}
-$hwName=if($HardwareProfile -eq 'b660m-3070ti'){'ASUS-TUF-GAMING-B660M-E-D4-4003-RTX3070TI'}else{'ASUS-TUF-B650M-PLUS-WIFI-3057-RTX3090-FE'}
+param([string]$Clang='clang',[string]$LldLink='lld-link',[string]$Python='python',[ValidateSet('b650m-3090fe','b660m-3070ti','z690-3060ti')][string]$HardwareProfile='b650m-3090fe')
+$hwDefine=switch($HardwareProfile){'z690-3060ti'{'-DGU_PROFILE_Z690_3060TI'} 'b660m-3070ti'{'-DGU_PROFILE_B660M_3070TI'} default{'-DGU_PROFILE_B650M_3090FE'}}
+$hwName=switch($HardwareProfile){'z690-3060ti'{'ASUS-TUF-GAMING-Z690-PLUS-WIFI-D4-2602-RTX3060TI'} 'b660m-3070ti'{'ASUS-TUF-GAMING-B660M-E-D4-4003-RTX3070TI'} default{'ASUS-TUF-B650M-PLUS-WIFI-3057-RTX3090-FE'}}
 $ErrorActionPreference='Stop'
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 . (Join-Path $repo 'internal-boot/install/headless-package.ps1')
@@ -18,11 +18,12 @@ Push-Location (Join-Path $repo 'internal-boot/boot')
 try {
  [void][IO.Directory]::CreateDirectory((Join-Path $PWD 'build/headless'))
  @('/* Local headless child contract; GPL-2.0-only. */',('#define GU_UNLOCK_SHA256 "'+$hash+'"'),('#define GU_UNLOCK_BYTES '+(Get-Item $child).Length)) | Set-Content build/headless/child-contract.h -Encoding ascii
- $sources=@('handoff.c','full-release.c','full-flow.c','diagnostic.c','probe.c','../unlock/checks.c','../unlock/sha256.c','../efi_runtime.c')
+ # The hardware probe belongs only to build-diagnostic.ps1.
+ $sources=@('handoff.c','full-release.c','full-flow.c','diagnostic.c','../unlock/checks.c','../unlock/sha256.c','../efi_runtime.c')
  $objects=@()
  foreach($source in $sources) {
   $obj='build/headless/'+[IO.Path]::GetFileNameWithoutExtension($source)+'.obj'
-  & $Clang -target x86_64-pc-windows-msvc -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone -fshort-wchar -Os -Wall -Wextra -Werror -DGU_HEADLESS_RESEARCH -DGU_SINGLE_RTX_CONSOLE -DGU_FULL_UNLOCK -DGU_AUTOMATIC_BOOT -DGU_DIAGNOSTIC_PROBE $hwDefine -I ../../deps/edk2/MdePkg/Include -I ../../deps/edk2/MdePkg/Include/X64 -c $source -o $obj
+  & $Clang -target x86_64-pc-windows-msvc -std=c11 -ffreestanding -fno-builtin -fno-stack-protector -mno-red-zone -fshort-wchar -Os -Wall -Wextra -Werror -DGU_HEADLESS_RESEARCH -DGU_SINGLE_RTX_CONSOLE -DGU_FULL_UNLOCK -DGU_AUTOMATIC_BOOT $hwDefine -I ../../deps/edk2/MdePkg/Include -I ../../deps/edk2/MdePkg/Include/X64 -c $source -o $obj
   if($LASTEXITCODE -ne 0){throw "Headless wrapper compile failed: $source"};$objects+=$obj
  }
  & $LldLink /nologo /nodefaultlib /subsystem:efi_application /entry:efi_main /machine:x64 /base:0 /dynamicbase /nxcompat /timestamp:0 /opt:ref /opt:icf /map:build/headless/HEADLESS.map /out:build/headless/HEADLESS.EFI @objects

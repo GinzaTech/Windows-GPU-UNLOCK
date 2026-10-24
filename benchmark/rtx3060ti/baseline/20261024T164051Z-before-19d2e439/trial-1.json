@@ -1,0 +1,93 @@
+{
+  "number": 1,
+  "gpu_before": {
+    "name": "NVIDIA GeForce RTX 3060 Ti",
+    "pci.bus_id": "00000000:01:00.0",
+    "pci.device_id": "0x248910DE",
+    "pci.sub_device_id": "0x88271043",
+    "driver_version": "617.42",
+    "compute_cap": "8.6",
+    "power.limit": "200.00",
+    "power.draw": "52.33",
+    "clocks.current.sm": "1755",
+    "temperature.gpu": "42",
+    "memory.used": "1757",
+    "utilization.gpu": "5"
+  },
+  "benchmarks": [
+    {
+      "name": "fp32_pedantic",
+      "n": 4096,
+      "samples": 30,
+      "warmup_seconds": 2.0,
+      "median_ms": 13.654832363128662,
+      "min_ms": 11.875136375427246,
+      "max_ms": 17.267391204833984,
+      "tflops": 10.065224516642056,
+      "input_type": 0,
+      "output_type": 0,
+      "compute_type": 68,
+      "math_mode": 2,
+      "reference_checked": true
+    },
+    {
+      "name": "tf32_tensor_fp32_accumulate",
+      "n": 4096,
+      "samples": 30,
+      "warmup_seconds": 2.0,
+      "median_ms": 8.163328170776367,
+      "min_ms": 7.614463806152344,
+      "max_ms": 9.080479621887207,
+      "tflops": 16.836142146534453,
+      "input_type": 0,
+      "output_type": 0,
+      "compute_type": 77,
+      "math_mode": 3,
+      "reference_checked": true
+    },
+    {
+      "name": "fp16_tensor_fp32_accumulate",
+      "n": 4096,
+      "samples": 30,
+      "warmup_seconds": 2.0,
+      "median_ms": 3.915120005607605,
+      "min_ms": 3.895296096801758,
+      "max_ms": 5.405695915222168,
+      "tflops": 35.10465918672913,
+      "input_type": 2,
+      "output_type": 0,
+      "compute_type": 68,
+      "math_mode": 1,
+      "reference_checked": true
+    },
+    {
+      "name": "bf16_tensor_fp32_accumulate",
+      "n": 4096,
+      "samples": 30,
+      "warmup_seconds": 2.0,
+      "median_ms": 3.9270401000976562,
+      "min_ms": 3.898207902908325,
+      "max_ms": 5.746687889099121,
+      "tflops": 34.998102888886265,
+      "input_type": 14,
+      "output_type": 0,
+      "compute_type": 68,
+      "math_mode": 1,
+      "reference_checked": true
+    }
+  ],
+  "gpu_after": {
+    "name": "NVIDIA GeForce RTX 3060 Ti",
+    "pci.bus_id": "00000000:01:00.0",
+    "pci.device_id": "0x248910DE",
+    "pci.sub_device_id": "0x88271043",
+    "driver_version": "617.42",
+    "compute_cap": "8.6",
+    "power.limit": "200.00",
+    "power.draw": "136.75",
+    "clocks.current.sm": "1950",
+    "temperature.gpu": "51",
+    "memory.used": "1758",
+    "utilization.gpu": "99"
+  }
+}

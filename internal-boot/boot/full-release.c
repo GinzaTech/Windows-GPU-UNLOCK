@@ -25,7 +25,7 @@ typedef struct {
   UINT32 Config[64],Cold[9];
   EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR Bar;
   UINT64 Attributes;
-  BOOLEAN Captured,Released,Owned,Restored;
+  BOOLEAN Captured,Released,Owned,Restored,PreflightFailed;
 #ifdef GU_HEADLESS_RESEARCH
   EFI_HANDLE Children[GU_HEADLESS_MAX_DISPLAY_CHILDREN];
   UINT8 ChildPaths[GU_HEADLESS_MAX_DISPLAY_CHILDREN][36];
@@ -34,6 +34,9 @@ typedef struct {
 #endif
 } FULL;
 static FULL Full;
+BOOLEAN GuReleasePreflightFailed(VOID) {
+  return Full.PreflightFailed && !Full.Released && !Full.Owned && !Full.Restored;
+}
 static BOOLEAN OwnRecord(EFI_HANDLE h,const EFI_OPEN_PROTOCOL_INFORMATION_ENTRY *e) {
   return Full.Owned && h==PreparedPlan.RtxPci && e->AgentHandle==Full.Image && !e->ControllerHandle &&
     e->Attributes==EFI_OPEN_PROTOCOL_EXCLUSIVE && e->OpenCount==1;
@@ -85,18 +88,55 @@ static EFI_STATUS CheckBar(BOOLEAN first) {
   if(raw && Full.Table->BootServices->FreePool(raw)!=EFI_SUCCESS)s=EFI_DEVICE_ERROR;
   return s;
 }
-static EFI_STATUS Cold(UINT32 *values) {
+static EFI_STATUS Cold(UINT32 *values,UINTN *readCount,UINTN *failedIndex) {
   EFI_PCI_IO_PROTOCOL *io=PreparedPlan.RtxIo;
+  if(readCount)*readCount=0;
+  if(failedIndex)*failedIndex=9;
   if(!io->Mem.Read)return EFI_UNSUPPORTED;
   for(UINTN i=0;i<9;i++) {
     EFI_STATUS s=io->Mem.Read(io,EfiPciIoWidthUint32,0,ColdOffsets[i],1,&values[i]);
-    if(s!=EFI_SUCCESS)return s;
+    if(s!=EFI_SUCCESS){if(failedIndex)*failedIndex=i;return s;}
+    if(readCount)*readCount=i+1;
   }
   if(values[0]!=GU_CHIP_ID || values[1]!=0x8b8f || values[2]!=0x3ff || values[3]!=0x10 || values[4] ||
      values[5]!=0xffffff8f || values[6]==0xffffffff || values[6]==0x88888888 || (values[6]&0xffff0000)==0xbadf0000 ||
      values[7]>15 || values[8]!=GU_DEVICE_MEMORY_SIZE)return EFI_NOT_READY;
+#if defined(GU_PROFILE_Z690_3060TI)
+  /* Accept only the two observed entry selectors on this exact card; later
+   * no-effect and post-release checks still require the same live snapshot. */
+  if(!GU_PROFILE_COLD_SS0_ALLOWED(values[6]) || values[7]!=GU_PROFILE_COLD_SS1)return EFI_NOT_READY;
+#endif
   return EFI_SUCCESS;
 }
+#if defined(GU_HEADLESS_RESEARCH) && defined(GU_PROFILE_Z690_3060TI)
+/* Report the exact pre-release sample after all reads. Logging may invoke
+ * firmware callbacks, so later no-effect checks still take fresh samples. */
+static EFI_STATUS LogColdSample(const UINT32 *values,UINTN readCount,UINTN failedIndex,EFI_STATUS result) {
+  const char *hex="0123456789abcdef";
+  for(UINTN i=0;i<readCount;i++) {
+    char event[64];UINTN n=0;
+    const char *prefix="capture-cold-offset-0x";
+    while(*prefix)event[n++]=*prefix++;
+    for(int d=7;d>=0;d--)event[n++]=hex[(ColdOffsets[i]>>(d*4))&15];
+    const char *middle="-value-0x";
+    while(*middle)event[n++]=*middle++;
+    for(int d=7;d>=0;d--)event[n++]=hex[(values[i]>>(d*4))&15];
+    event[n]=0;
+    EFI_STATUS logged=Note(event,EFI_SUCCESS);
+    if(logged!=EFI_SUCCESS)return logged;
+  }
+  if(failedIndex<9) {
+    char event[64];UINTN n=0;
+    const char *prefix="capture-cold-read-failed-offset-0x";
+    while(*prefix)event[n++]=*prefix++;
+    for(int d=7;d>=0;d--)event[n++]=hex[(ColdOffsets[failedIndex]>>(d*4))&15];
+    event[n]=0;
+    EFI_STATUS logged=Full.Log(Full.Context,event,result);
+    if(logged!=EFI_SUCCESS)return logged;
+  }
+  return EFI_SUCCESS;
+}
+#endif
 static EFI_STATUS Prom(VOID) {
   EFI_BOOT_SERVICES *bs=Full.Table->BootServices;EFI_PCI_IO_PROTOCOL *io=PreparedPlan.RtxIo;
   UINT8 *data=NULL;EFI_STATUS s=bs->AllocatePool(EfiBootServicesData,1048576,(VOID **)&data);
@@ -138,12 +178,69 @@ static EFI_STATUS FullConsumers(const GRAPH *g) {
   for(UINTN i=0;i<g->Count;i++) {
     const EDGE *e=&g->Edges[i];if(e->Handle!=PreparedPlan.RtxPci)continue;
     if(e->Count!=1 || !e->Agent)return EFI_ACCESS_DENIED;
-    if(GuGuidEqual(&e->Protocol,&PathGuid) && e->Attributes==EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER){children++;Full.Children[0]=e->Controller;}
+    if(GuGuidEqual(&e->Protocol,&PathGuid) && e->Attributes==EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER) {
+#if GU_CONSOLE_MULTI_CHILD
+      if(!e->Controller || e->Agent!=PreparedPlan.NvChildAgent || children>=GU_HEADLESS_MAX_DISPLAY_CHILDREN)return EFI_ACCESS_DENIED;
+      for(UINTN prior=0;prior<children;prior++)if(Full.Children[prior]==e->Controller)return EFI_ACCESS_DENIED;
+      Full.Children[children++]=e->Controller;
+#else
+      children++;Full.Children[0]=e->Controller;
+#endif
+    }
     else if(e->Attributes==EFI_OPEN_PROTOCOL_BY_DRIVER && e->Controller==PreparedPlan.RtxPci) {
       if(e->Agent!=PreparedPlan.NvAgent)return EFI_ACCESS_DENIED;
       if(GuGuidEqual(&e->Protocol,&PciGuid)){Full.NvAgent=e->Agent;owners++;}
     } else return EFI_ACCESS_DENIED;
   }
+#if GU_CONSOLE_MULTI_CHILD
+  if(owners!=1 || children!=3 || children!=PreparedPlan.ChildCount ||
+     Full.NvAgent==Full.Image || Full.NvAgent!=PreparedPlan.NvAgent)return EFI_ACCESS_DENIED;
+  EFI_HANDLE observedChildren[GU_HEADLESS_MAX_DISPLAY_CHILDREN];
+  for(UINTN c=0;c<children;c++)observedChildren[c]=Full.Children[c];
+  for(UINTN c=0;c<children;c++) {
+    BOOLEAN found=FALSE;
+    for(UINTN observed=0;observed<children;observed++)if(observedChildren[observed]==PreparedPlan.Children[c])found=TRUE;
+    if(!found)return EFI_ACCESS_DENIED;
+    Full.Children[c]=PreparedPlan.Children[c];
+  }
+  if(Full.Children[0]!=PreparedPlan.Rtx)return EFI_ACCESS_DENIED;
+  Full.ChildCount=children;
+  for(UINTN c=0;c<Full.ChildCount;c++) {
+    EFI_HANDLE child=Full.Children[c];EFI_DEVICE_PATH_PROTOCOL *path=NULL;VOID *foundEdid=NULL,*other=NULL;
+    EFI_STATUS s=Interface(bs,child,&PathGuid,(VOID **)&path);
+    if(s!=EFI_SUCCESS || !DisplayRoute(path,RtxPath) || !Bytes(path,PreparedPlan.ChildPaths[c],36))return EFI_UNSUPPORTED;
+    UINT32 cfg[16];EFI_HANDLE pci=NULL;EFI_PCI_IO_PROTOCOL *io=NULL;
+    s=PciFor(bs,path,1,GU_BOARD_ID,GU_BOARD_SUBSYSTEM,&pci,&io,cfg);
+    if(s!=EFI_SUCCESS || pci!=PreparedPlan.RtxPci || io!=PreparedPlan.RtxIo ||
+       !Bytes(cfg,PreparedPlan.RtxConfig,sizeof(cfg)))return EFI_NOT_READY;
+    for(UINTN j=0;j<36;j++)Full.ChildPaths[c][j]=((UINT8 *)path)[j];
+    if(Interface(bs,child,&EdidGuid,&foundEdid)!=EFI_SUCCESS || !foundEdid)return EFI_UNSUPPORTED;
+    if(c) {
+      s=Interface(bs,child,&GopGuid,&other);
+      if(!((s==EFI_NOT_FOUND || s==EFI_UNSUPPORTED) && !other))return EFI_UNSUPPORTED;
+      s=Interface(bs,child,&TextGuid,&other);
+      if(!((s==EFI_NOT_FOUND || s==EFI_UNSUPPORTED) && !other))return EFI_UNSUPPORTED;
+    }
+    UINTN childEdid=0,childCombo=0;
+    for(UINTN i=0;i<g->Count;i++) {
+      const EDGE *e=&g->Edges[i];if(e->Handle!=child)continue;
+      if(e->Count!=1 || !e->Agent)return EFI_ACCESS_DENIED;
+      if(GuGuidEqual(&e->Protocol,&EdidGuid) && e->Attributes==EFI_OPEN_PROTOCOL_BY_DRIVER &&
+         e->Controller==child && e->Agent==PreparedPlan.EdidAgent)childEdid++;
+      else if(!c && GuGuidEqual(&e->Protocol,&GopGuid) && e->Agent==PreparedPlan.ComboAgent &&
+              e->Attributes==EFI_OPEN_PROTOCOL_BY_DRIVER && e->Controller==child)childCombo++;
+      else if(!c && GuGuidEqual(&e->Protocol,&GopGuid) && e->Agent==PreparedPlan.ComboAgent &&
+              e->Attributes==EFI_OPEN_PROTOCOL_BY_CHILD_CONTROLLER && e->Controller==PreparedPlan.Agg)childCombo++;
+      else return EFI_ACCESS_DENIED;
+    }
+    if(childEdid!=1 || childCombo!=(c?0U:2U))return EFI_ACCESS_DENIED;
+    edid+=childEdid;combo+=childCombo;
+  }
+  Full.EdidAgent=PreparedPlan.EdidAgent;
+  if(edid!=Full.ChildCount || combo!=2 || Full.EdidAgent==Full.NvAgent ||
+     Full.EdidAgent==Full.Image || Full.EdidAgent==PreparedPlan.ComboAgent)return EFI_ACCESS_DENIED;
+  return EFI_SUCCESS;
+#else
   if(owners!=1 || children!=1 || Full.NvAgent==Full.Image || Full.NvAgent!=PreparedPlan.NvAgent ||
      Full.Children[0]!=PreparedPlan.Rtx)return EFI_ACCESS_DENIED;
   {
@@ -169,6 +266,7 @@ static EFI_STATUS FullConsumers(const GRAPH *g) {
    * shared stage-3 EDID detach loop (v0.3.1 runtime child discovery). */
   Full.ChildCount=1;
   return EFI_SUCCESS;
+#endif
 #elif defined(GU_HEADLESS_RESEARCH)
   UINTN owners=0,children=0;
   EFI_BOOT_SERVICES *bs=Full.Table->BootServices;
@@ -250,7 +348,13 @@ static EFI_STATUS FullConsumers(const GRAPH *g) {
 #if defined(GU_HEADLESS_RESEARCH) && GU_CONSOLE_AGGREGATE
 /* 0 keep exact, 1 may disappear (tolerated orphan cascade), 2 must be gone. */
 static UINTN EdgeClass(const EDGE *e,UINTN stage) {
+#if GU_CONSOLE_MULTI_CHILD
+  for(UINTN c=0;c<Full.EdidDetached;c++)
+    if(e->Handle==Full.Children[c] && e->Agent==Full.EdidAgent && GuGuidEqual(&e->Protocol,&EdidGuid))return 2;
+  if(stage>=4)for(UINTN c=0;c<Full.ChildCount;c++)if(e->Handle==Full.Children[c])return 2;
+#else
   if(stage>=3 && e->Handle==PreparedPlan.Rtx && e->Agent==PreparedPlan.EdidAgent)return 2;
+#endif
   if(e->Agent==PreparedPlan.EdidAgent)return 1;
   if(e->Handle==PreparedPlan.Agg)return 1;
   if(stage>=4 && ((e->Handle==PreparedPlan.RtxPci && (e->Agent==PreparedPlan.NvAgent || e->Agent==PreparedPlan.NvChildAgent)) ||
@@ -370,7 +474,15 @@ static EFI_STATUS CapturePermit(VOID) {
   s=LogConfig("pre-nv-pci",Full.Config);if(s!=EFI_SUCCESS)return s;
   s=Note("capture-bar0",CheckBar(TRUE));if(s!=EFI_SUCCESS)return s;
   s=Note("capture-prom",Prom());if(s!=EFI_SUCCESS)return s;
-  s=Note("capture-cold",Cold(Full.Cold));if(s!=EFI_SUCCESS)return s;
+#if defined(GU_HEADLESS_RESEARCH) && defined(GU_PROFILE_Z690_3060TI)
+  UINTN coldReadCount=0,coldFailedIndex=9;
+  EFI_STATUS cold=Cold(Full.Cold,&coldReadCount,&coldFailedIndex);
+  s=LogColdSample(Full.Cold,coldReadCount,coldFailedIndex,cold);
+  if(s!=EFI_SUCCESS)return s;
+  s=Note("capture-cold",cold);if(s!=EFI_SUCCESS)return s;
+#else
+  s=Note("capture-cold",Cold(Full.Cold,NULL,NULL));if(s!=EFI_SUCCESS)return s;
+#endif
   EFI_PCI_IO_PROTOCOL *io=PreparedPlan.RtxIo;
   if(s==EFI_SUCCESS && !io->Attributes)s=EFI_UNSUPPORTED;
   if(s==EFI_SUCCESS)s=io->Attributes(io,EfiPciIoAttributeOperationGet,0,&Full.Attributes);
@@ -426,7 +538,7 @@ static EFI_STATUS RestoreDecode(VOID) {
   if(s==EFI_SUCCESS)s=CheckBar(FALSE);
   if(s==EFI_SUCCESS)s=Prom();
   UINT32 cold[9];
-  if(s==EFI_SUCCESS)s=Cold(cold);
+  if(s==EFI_SUCCESS)s=Cold(cold,NULL,NULL);
   if(s==EFI_SUCCESS && !Bytes(cold,Full.Cold,sizeof(cold)))s=EFI_NOT_READY;
   EFI_STATUS closed=bs->CloseProtocol(PreparedPlan.RtxPci,&PciGuid,Full.Image,NULL);
   if(closed==EFI_SUCCESS)Full.Owned=FALSE;
@@ -450,7 +562,12 @@ EFI_STATUS GuReleaseGop(EFI_SYSTEM_TABLE *t,EFI_HANDLE image,GU_PREPARE_LOG log,
   if(s==EFI_SUCCESS)s=Note("ami-runtime-code-profile",Profile(Full.EdidAgent,TRUE));
   if(s==EFI_SUCCESS)s=Note("nvidia-code-profile",Profile(Full.NvAgent,FALSE));
   if(s==EFI_SUCCESS)s=CapturePermit();
-  s=Note("full-release-preflight",s);if(s!=EFI_SUCCESS)return s;
+  s=Note("full-release-preflight",s);
+  if(s!=EFI_SUCCESS) {
+    /* No DisconnectController or PCI attribute Enable has been attempted. */
+    Full.PreflightFailed=TRUE;
+    return s;
+  }
   for(UINTN stage=3;stage<=4;stage++) {
 #ifdef GU_HEADLESS_RESEARCH
     UINTN repeats=stage==3?Full.ChildCount:1;
@@ -461,7 +578,7 @@ EFI_STATUS GuReleaseGop(EFI_SYSTEM_TABLE *t,EFI_HANDLE image,GU_PREPARE_LOG log,
     UINT32 cfg[64],cold[9];
     if(s==EFI_SUCCESS)s=ReadConfigFull(cfg);
     if(s==EFI_SUCCESS && !Bytes(cfg,Full.Config,sizeof(cfg)))s=EFI_NOT_READY;
-    if(s==EFI_SUCCESS)s=Cold(cold);
+    if(s==EFI_SUCCESS)s=Cold(cold,NULL,NULL);
     if(s==EFI_SUCCESS && !Bytes(cold,Full.Cold,sizeof(cold)))s=EFI_NOT_READY;
     EFI_TPL old=bs->RaiseTPL(TPL_NOTIFY);
     if(s==EFI_SUCCESS)s=Profile(stage==3?Full.EdidAgent:Full.NvAgent,stage==3);
@@ -537,7 +654,7 @@ EFI_STATUS GuVerifyReleased(EFI_SYSTEM_TABLE *t,BOOLEAN checkCold) {
   VERIFY_STEP("verify-pci-attributes-read",PreparedPlan.RtxIo->Attributes(PreparedPlan.RtxIo,EfiPciIoAttributeOperationGet,0,&attrs));
   VERIFY_STEP("verify-pci-attributes-match",attrs==Full.Attributes?EFI_SUCCESS:EFI_NOT_READY);
   if(checkCold) {
-    VERIFY_STEP("verify-cold-read",Cold(cold));
+    VERIFY_STEP("verify-cold-read",Cold(cold,NULL,NULL));
     VERIFY_STEP("verify-cold-match",Bytes(cold,Full.Cold,sizeof(cold))?EFI_SUCCESS:EFI_NOT_READY);
   }
   VERIFY_STEP("verify-driver-graph-read",Snapshot(t->BootServices,&g));

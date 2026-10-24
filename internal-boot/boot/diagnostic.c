@@ -11,6 +11,10 @@
 #include <Protocol/PciIo.h>
 #include <Guid/GlobalVariable.h>
 #include "probe.h"
+#if defined(GU_FULL_UNLOCK) || defined(GU_SELECTOR_TIMELINE)
+/* Capture must use the same console topology profile as release. */
+#include "../unlock/machine-profile.h"
+#endif
 
 #define MAX_HANDLES 4096
 #define MAX_PROTOCOLS 256
@@ -138,9 +142,11 @@ static VOID Details(CAPTURE *c,EFI_HANDLE h,EFI_GUID *g) {
       Field(c," height=0x",gp->Mode->Info->VerticalResolution);
       Field(c," stride=0x",gp->Mode->Info->PixelsPerScanLine);End(c);
     } else {
-#if GU_CONSOLE_AGGREGATE
-      /* Aggregate/pathless GOPs legitimately lack Mode->Info on this firmware;
-         record it as an observation, not a capture failure. */
+#if defined(GU_DIAGNOSTIC_ONLY)
+      /* Unknown console topology: record the absent info for review. */
+      Field(c,"gop info-bytes=0x",gp->Mode->SizeOfInfo);End(c);
+#elif GU_CONSOLE_AGGREGATE
+      /* Aggregate/pathless GOPs legitimately lack Mode->Info on this firmware. */
       Field(c,"gop info-bytes=0x",gp->Mode->SizeOfInfo);End(c);
 #else
       Problem(c,"gop-info",EFI_NOT_READY);
@@ -173,7 +179,8 @@ EFI_STATUS GuCaptureGraph(EFI_SYSTEM_TABLE *t,EFI_FILE_PROTOCOL *file) {
   EFI_STATUS s=bs->LocateHandleBuffer(AllHandles,NULL,NULL,&count,&handles);
 #ifdef GU_DIAGNOSTIC_PROBE
     /* Read-only profile probe: config space, caps, BAR/PROM hash, image dumps. */
-    (void)GuProbeGpu(t,&c);
+    EFI_STATUS probe=GuProbeGpu(t,&c);
+    if(probe!=EFI_SUCCESS)Problem(&c,"gpu-probe",probe);
 #endif
   Field(&c,"handles status=0x",s);Field(&c," count=0x",count);End(&c);
   if(s!=EFI_SUCCESS || !handles || !count || count>MAX_HANDLES)Problem(&c,"handle-snapshot",s==EFI_SUCCESS?EFI_BAD_BUFFER_SIZE:s);

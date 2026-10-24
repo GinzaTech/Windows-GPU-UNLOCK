@@ -2,7 +2,6 @@
 #pragma once
 #include <Uefi.h>
 #include <Protocol/SimpleFileSystem.h>
-#include "../unlock/machine-profile.h"
 typedef struct CAPTURE_S {
   EFI_SYSTEM_TABLE *Table;
   EFI_FILE_PROTOCOL *File;
@@ -12,4 +11,5 @@ typedef struct CAPTURE_S {
   char Buffer[4096];
 } CAPTURE;
 EFI_STATUS GuProbeGpu(EFI_SYSTEM_TABLE *t,CAPTURE *c);
+VOID GuProbeSetOutput(EFI_FILE_PROTOCOL *Root,UINTN Run);
 

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 typedef struct {
   EFI_STATUS prepare,choose,before,release,after,verify,unlock,windows;
-  BOOLEAN skip;
+  BOOLEAN skip,certifiedNoEffects;
   int recordFail,records,captures,releases,verifies,unlocks,skipBoots,boots;
 } TEST;
 static int Checks;
@@ -12,7 +12,11 @@ static VOID Check(int ok,const char *name) {Checks++;if(!ok){fprintf(stderr,"FAI
 static EFI_STATUS Prepare(VOID *v){return ((TEST *)v)->prepare;}
 static EFI_STATUS Choose(VOID *v,BOOLEAN *skip){TEST *t=v;*skip=t->skip;return t->choose;}
 static EFI_STATUS Capture(VOID *v){TEST *t=v;return ++t->captures==1?t->before:t->after;}
-static EFI_STATUS Release(VOID *v){TEST *t=v;t->releases++;return t->release;}
+static EFI_STATUS Release(VOID *v,BOOLEAN *effectAttempted){
+  TEST *t=v;t->releases++;
+  if(t->certifiedNoEffects)*effectAttempted=FALSE;
+  return t->release;
+}
 static EFI_STATUS Verify(VOID *v){TEST *t=v;t->verifies++;return t->verify;}
 static EFI_STATUS Unlock(VOID *v){TEST *t=v;t->unlocks++;return t->unlock;}
 static EFI_STATUS SkipWindows(VOID *v){TEST *t=v;t->skipBoots++;return t->windows;}
@@ -33,6 +37,24 @@ int main(void) {
     t=(TEST){.unlock=bad[i]};Check(Run(&t)==bad[i] && t.unlocks==1 && !t.boots,"original app failure/timeout/cancel/warning never boots Windows");
     t=(TEST){.windows=bad[i]};Check(Run(&t)==bad[i] && t.unlocks==1 && t.boots==1,"returned Windows status is preserved");
   }
+  t=(TEST){.release=EFI_NOT_READY,.certifiedNoEffects=TRUE};
+  Check(Run(&t)==EFI_ABORTED && t.captures==2 && t.releases==1 && t.skipBoots==1 && !t.unlocks && !t.boots,
+    "certified pre-effect failure uses original Windows path without unlock");
+  t=(TEST){.release=EFI_NOT_READY,.certifiedNoEffects=TRUE,.after=EFI_DEVICE_ERROR};
+  Check(Run(&t)==EFI_NOT_READY && !t.skipBoots && !t.unlocks,
+    "failed post-release capture blocks even certified Windows fallback");
+  t=(TEST){.release=EFI_NOT_READY,.certifiedNoEffects=TRUE,.recordFail=1};
+  Check(Run(&t)==EFI_NOT_READY && !t.skipBoots,
+    "failed preparation record blocks certified Windows fallback");
+  t=(TEST){.release=EFI_NOT_READY,.certifiedNoEffects=TRUE,.recordFail=2};
+  Check(Run(&t)==EFI_DEVICE_ERROR && !t.skipBoots,
+    "failed safe-fallback record blocks Windows");
+  t=(TEST){.release=EFI_NOT_READY,.certifiedNoEffects=TRUE,.windows=EFI_DEVICE_ERROR};
+  Check(Run(&t)==EFI_DEVICE_ERROR && t.skipBoots==1 && !t.unlocks,
+    "safe-fallback Windows failure is propagated without retry");
+  t=(TEST){.certifiedNoEffects=TRUE};
+  Check(Run(&t)==EFI_COMPROMISED_DATA && !t.unlocks && !t.skipBoots && !t.boots,
+    "release success without an effect attempt cannot arm unlock");
   for(int i=1;i<=4;i++) {
     t=(TEST){.recordFail=i};Check(Run(&t)==EFI_DEVICE_ERROR && !t.boots && t.unlocks==(i>=3),"each durable log failure blocks following mutation/Windows");
   }

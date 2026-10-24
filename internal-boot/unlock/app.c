@@ -294,6 +294,10 @@ static EFI_STATUS ColdCheck(VOID) {
      hi!=0 || plm!=0xffffff8f || !Gu.prom_verified)
     return EFI_NOT_READY;
 #ifdef GU_ENTRY_LATCHED
+#ifdef GU_PROFILE_Z690_3060TI
+  /* Only the two observed board values may establish the first live latch. */
+  if(!GU_PROFILE_COLD_SS0_ALLOWED(ss0) || ss1!=GU_PROFILE_COLD_SS1)return EFI_NOT_READY;
+#endif
   if(!GuLatchEntrySelectors(ss0,ss1))return EFI_NOT_READY;
   GuLog("entry selectors: latched_once=1 SS0=%#x SS1=%#x SS0target=0x88888888 SS1policy=%s SS1target=0x8\n",ss0,ss1,
 #ifdef GU_ENTRY_LATCHED_SS1_PRESERVE

@@ -2,7 +2,7 @@
 
 **English** | [한국어](COMPATIBILITY.ko.md)
 
-The current implementation checks more than a model name. Two machines have
+The current implementation checks more than a model name. Three machines have
 recorded successful internal headless boots. Builds compile for exactly one
 reviewed profile selected at build time in
 [internal-boot/unlock/machine-profile.h](../internal-boot/unlock/machine-profile.h);
@@ -69,6 +69,32 @@ unlock on this profile as well; there is no resume path.
 Select this profile with `research/headless/build-unlock.ps1 -HardwareProfile b660m-3070ti`
 and `internal-boot/Configure.ps1 -HardwareProfile b660m-3070ti`; the default
 `b650m-3090fe` profile is unchanged.
+
+## Profile 3: ASUS TUF Z690 / RTX 3060 Ti (three-child aggregate console)
+
+One F8-selected headless unlock, direct Windows handoff, NVIDIA display recovery,
+and a controlled CUDA before/after benchmark were observed on this exact system.
+
+| Common GPU/platform item | Validated value |
+|---|---|
+| Card | ASUS RTX 3060 Ti, 8 GiB (GA104) |
+| PCI identity | `10de:2489`, subsystem `1043:8827` |
+| GPU BDF | `0000:01:00.0` |
+| Chip / VRAM register | `0xb74000a1` / `0x2000` MiB |
+| BAR0 | `0x84000000`, 16 MiB |
+| PROM SHA256 | `6a124e5beccf659b1685ef294bc19a4f33fdfdf0fbd7eb69eff4bac9f129eb77` |
+| Motherboard / BIOS | ASUS TUF GAMING Z690-PLUS WIFI D4 / 2602 |
+| CPU | Intel Core i7-14700K |
+| Recorded Windows / driver | Windows 11 Pro / NVIDIA 617.42 |
+| UEFI / Secure Boot | x64 / disabled |
+| Selector profile | cold SS0 `0x54372112` or `0x54372012`, SS1 `0x4`; target `0x88888888` / `0x8` |
+
+The F8 entry remains experimental and Windows Boot Manager stays first. The
+[installation guide](WINDOWS-RTX3060TI.en.md), [Vietnamese guide](WINDOWS-RTX3060TI.vi.md),
+and [performance report](WINDOWS-RTX3060TI-RESULTS.en.md) give exact steps and
+evidence limits. A matching GPU model alone does not establish compatibility;
+different boards, BIOS releases, PROMs, GOP graphs, or PCI resources need their
+own read-only capture and guarded validation.
 
 | Other configuration | Status |
 |---|---|

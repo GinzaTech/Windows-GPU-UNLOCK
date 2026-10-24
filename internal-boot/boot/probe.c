@@ -9,24 +9,38 @@
 #include <Protocol/SimpleFileSystem.h>
 #include "../unlock/sha256.h"
 #include "probe.h"
-#include "../unlock/machine-profile.h"
 
 VOID Text(CAPTURE *c,const char *s);
 VOID Hex(CAPTURE *c,UINT64 v,UINTN digits);
 VOID End(CAPTURE *c);
 VOID Problem(CAPTURE *c,const char *where,EFI_STATUS s);
 
-#define GU_TARGET_VENDEV GU_BOARD_ID
+#if !defined(GU_DIAGNOSTIC_ONLY) || defined(GU_FULL_UNLOCK)
+#error The GPU probe must only be linked into a read-only diagnostic
+#endif
+#ifndef GU_DIAGNOSTIC_TARGET_PCI_ID
+#error Select an explicit GPU PCI ID for the diagnostic
+#endif
+#ifndef GU_DIAGNOSTIC_TARGET_SUBSYSTEM
+#error Select an explicit GPU subsystem for the diagnostic
+#endif
+#define GU_TARGET_VENDEV GU_DIAGNOSTIC_TARGET_PCI_ID
 static EFI_GUID PciGuidL=EFI_PCI_IO_PROTOCOL_GUID;
 static EFI_GUID BindGuidL=EFI_DRIVER_BINDING_PROTOCOL_GUID;
 static EFI_GUID ImgGuidL=EFI_LOADED_IMAGE_PROTOCOL_GUID;
 static EFI_GUID PathGuidL=EFI_DEVICE_PATH_PROTOCOL_GUID;
 static EFI_GUID GopGuidL=EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-static EFI_GUID SfsGuidL=EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 static EFI_SYSTEM_TABLE *SysT;
 static UINTN DumpIndex;
-static CHAR16 DirName[]=L"RTX3090-UNLOCK";
-static CHAR16 ImgPrefix[]=L"\\RTX3090-UNLOCK\\IMG";
+static UINTN DumpBytes;
+static UINTN DumpRun;
+static EFI_FILE_PROTOCOL *DumpRoot;
+#define GU_MAX_DUMP_BYTES (16U * 1024U * 1024U)
+static CHAR16 ImgPrefix[]=L"\\RTX3060TI-DIAG\\IMG";
+static CHAR16 PromPrefix[]=L"\\RTX3060TI-DIAG\\PROM";
+VOID GuProbeSetOutput(EFI_FILE_PROTOCOL *Root,UINTN Run) {
+  DumpRoot=Root;DumpRun=Run;
+}
 
 static VOID PH(CAPTURE *c,const char *s,UINT64 v){Text(c,s);Hex(c,v,16);End(c);}
 
@@ -50,17 +64,49 @@ static VOID DumpImage(CAPTURE *c,EFI_FILE_PROTOCOL *root,EFI_HANDLE img) {
   PH(c,"img code-type=0x",li->ImageCodeType);
   DumpPath(c,li->FilePath,4096);
   if(!li->ImageBase||!li->ImageSize||li->ImageSize>4U*1024U*1024U)return;
+  UINT8 digest[32];
+  GuSha256(li->ImageBase,li->ImageSize,digest);
+  Text(c,"img sha256=");for(UINTN j=0;j<32;j++)Hex(c,digest[j],2);End(c);
+  if(DumpIndex>=99 || li->ImageSize>GU_MAX_DUMP_BYTES-DumpBytes) {
+    Text(c,"img dump skipped: private capture size limit");End(c);return;
+  }
   CHAR16 name[40];UINTN i=DumpIndex++,k=0;
   Text(c,"img dump index=");Hex(c,i,4);End(c);
   while(ImgPrefix[k])name[k]=ImgPrefix[k],k++;
+  name[k++]=(CHAR16)('0'+(DumpRun/10)%10);name[k++]=(CHAR16)('0'+DumpRun%10);
   name[k++]=(CHAR16)('0'+(i/10)%10);name[k++]=(CHAR16)('0'+i%10);
   name[k++]='.';name[k++]='B';name[k++]='I';name[k++]='N';name[k]=0;
   EFI_FILE_PROTOCOL *f=NULL;
-  EFI_STATUS s=root->Open(root,&f,name,EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
+  EFI_STATUS s=root->Open(root,&f,name,EFI_FILE_MODE_READ,0);
+  if(s==EFI_SUCCESS){if(f)f->Close(f);Problem(c,"img-already-exists",EFI_ALREADY_STARTED);return;}
+  if(s!=EFI_NOT_FOUND){Problem(c,"img-presence",s);return;}
+  s=root->Open(root,&f,name,EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
   if(s!=EFI_SUCCESS||!f){Problem(c,"img-open",s);return;}
   UINTN n=li->ImageSize;s=f->Write(f,&n,li->ImageBase);
+  DumpBytes+=n;
   if(s!=EFI_SUCCESS||n!=li->ImageSize)Problem(c,"img-write",s==EFI_SUCCESS?EFI_END_OF_FILE:s);
   f->Close(f);
+}
+
+static VOID DumpProm(CAPTURE *c,const UINT8 *data) {
+  CHAR16 name[40];UINTN k=0;
+  while(PromPrefix[k])name[k]=PromPrefix[k],k++;
+  name[k++]=(CHAR16)('0'+DumpRun/10);name[k++]=(CHAR16)('0'+DumpRun%10);
+  name[k++]='.';name[k++]='B';name[k++]='I';name[k++]='N';name[k]=0;
+  EFI_FILE_PROTOCOL *file=NULL;
+  EFI_STATUS s=DumpRoot->Open(DumpRoot,&file,name,EFI_FILE_MODE_READ,0);
+  if(s==EFI_SUCCESS){if(file)file->Close(file);Problem(c,"prom-already-exists",EFI_ALREADY_STARTED);return;}
+  if(s!=EFI_NOT_FOUND){Problem(c,"prom-presence",s);return;}
+  s=DumpRoot->Open(DumpRoot,&file,name,EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
+  if(s!=EFI_SUCCESS||!file){Problem(c,"prom-open",s);return;}
+  UINTN n=0x100000;
+  s=file->Write(file,&n,(VOID *)data);
+  if(s==EFI_SUCCESS&&n!=0x100000)s=EFI_END_OF_FILE;
+  if(s==EFI_SUCCESS)s=file->Flush(file);
+  EFI_STATUS closed=file->Close(file);
+  if(s==EFI_SUCCESS)s=closed;
+  if(s!=EFI_SUCCESS)Problem(c,"prom-save",s);
+  else {Text(c,"prom dump saved run=");Hex(c,DumpRun,2);End(c);}
 }
 
 static VOID ProbeCaps(CAPTURE *c,EFI_PCI_IO_PROTOCOL *io) {
@@ -87,7 +133,8 @@ static VOID ProbeBar(CAPTURE *c,EFI_PCI_IO_PROTOCOL *io,UINT32 bar) {
   static const UINT32 offs[]={
     0x000000,0x108154,0x108170,0x108180,0x108354,
     0x118128,0x118234,0x110100,0x1183a4,0x1fa828,
-    0x8219c0,0x822804,0x823804,0x82381c,0x823820,0x824140
+    0x8219c0,0x822804,0x823804,0x82381c,0x823820,0x824140,
+    0x625f04,0x1fa7c8,0x1fa824,0x1fa82c,0x1fa830,0x824148,0x8241e0
   };
   Text(c,"probe-bar0 base=0x");Hex(c,bar,16);End(c);
   for(UINTN i=0;i<sizeof(offs)/sizeof(offs[0]);i++) {
@@ -104,6 +151,7 @@ static VOID ProbeBar(CAPTURE *c,EFI_PCI_IO_PROTOCOL *io,UINT32 bar) {
     if(s==EFI_SUCCESS) {
       GuSha256(page,0x100000,digest);
       Text(c,"prom sha256=");for(UINTN i=0;i<32;i++)Hex(c,digest[i],2);End(c);
+      DumpProm(c,page);
     } else { Problem(c,"prom-read",s); }
     c->Table->BootServices->FreePool(page);
   } else Problem(c,"prom-alloc",s==EFI_SUCCESS?EFI_OUT_OF_RESOURCES:s);
@@ -144,21 +192,9 @@ static VOID ProbeGops(CAPTURE *c) {
 
 EFI_STATUS GuProbeGpu(EFI_SYSTEM_TABLE *t,CAPTURE *c) {
   SysT=t;
-  EFI_FILE_PROTOCOL *root=NULL;
-  {
-    EFI_HANDLE *sh=NULL;UINTN sn=0;
-    if(t->BootServices->LocateHandleBuffer(ByProtocol,&SfsGuidL,NULL,&sn,&sh)==EFI_SUCCESS&&sh) {
-      EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs=NULL;
-      for(UINTN i=0;i<sn && !root;i++)
-        if(t->BootServices->HandleProtocol(sh[i],&SfsGuidL,(VOID **)&fs)==EFI_SUCCESS&&fs) {
-          EFI_FILE_PROTOCOL *r=NULL,*d=NULL;
-          if(fs->OpenVolume(fs,&r)==EFI_SUCCESS&&r&&
-             r->Open(r,&d,DirName,EFI_FILE_MODE_READ,0)==EFI_SUCCESS&&d){d->Close(d);root=r;}
-          else if(r)r->Close(r);
-        }
-      t->BootServices->FreePool(sh);
-    }
-  }
+  DumpIndex=0;DumpBytes=0;
+  EFI_FILE_PROTOCOL *root=DumpRoot;
+  if(!root || DumpRun>99){Problem(c,"probe-output",EFI_INVALID_PARAMETER);return EFI_INVALID_PARAMETER;}
   EFI_BOOT_SERVICES *bs=t->BootServices;EFI_HANDLE *hs=NULL;UINTN n=0,found=0;
   EFI_STATUS s=bs->LocateHandleBuffer(ByProtocol,&PciGuidL,NULL,&n,&hs);
   if(s!=EFI_SUCCESS||!hs){Problem(c,"pci-enum",s);return s;}
@@ -174,18 +210,38 @@ EFI_STATUS GuProbeGpu(EFI_SYSTEM_TABLE *t,CAPTURE *c) {
       Text(c,"probe-target seg=0x");Hex(c,seg,4);Text(c," bus=0x");Hex(c,bus,4);
       Text(c," dev=0x");Hex(c,dev,4);Text(c," fun=0x");Hex(c,fun,4);End(c);
     }
-    UINT32 cfg[64];
+    UINT32 cfg[64]={0};
     s=io->Pci.Read(io,EfiPciIoWidthUint32,0,64,cfg);
     PH(c,"cfg256 status=0x",s);
-    if(s==EFI_SUCCESS){Text(c,"cfg dwords=");for(UINTN j=0;j<64;j++){Hex(c,cfg[j],8);Text(c," ");}End(c);}
-    UINT32 sub=0;io->Pci.Read(io,EfiPciIoWidthUint32,0x2c,1,&sub);PH(c,"subsystem=0x",sub);
+    if(s!=EFI_SUCCESS){Problem(c,"cfg256",s);continue;}
+    Text(c,"cfg dwords=");for(UINTN j=0;j<64;j++){Hex(c,cfg[j],8);Text(c," ");}End(c);
+    UINT32 sub=cfg[0x2c/4];PH(c,"subsystem=0x",sub);
+    if(cfg[0]!=GU_TARGET_VENDEV || sub!=GU_DIAGNOSTIC_TARGET_SUBSYSTEM) {
+      Problem(c,"target-identity",EFI_UNSUPPORTED);continue;
+    }
     ProbeCaps(c,io);
     UINT32 bar=cfg[0x10/4]&~0xfU;
-    if(bar)ProbeBar(c,io,bar);else Problem(c,"bar0",EFI_UNSUPPORTED);
+    EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR *r=NULL;
+    s=io->GetBarAttributes(io,0,NULL,(VOID **)&r);
+    PH(c,"bar0 descriptor status=0x",s);
+    if(s==EFI_SUCCESS && r && r->Desc==ACPI_ADDRESS_SPACE_DESCRIPTOR &&
+       r->Len==sizeof(*r)-3) {
+      PH(c,"bar0 descriptor min=0x",r->AddrRangeMin);
+      PH(c,"bar0 descriptor max=0x",r->AddrRangeMax);
+      PH(c,"bar0 descriptor bytes=0x",r->AddrLen);
+    }
+    BOOLEAN valid=s==EFI_SUCCESS && r && r->Desc==ACPI_ADDRESS_SPACE_DESCRIPTOR &&
+      r->Len==sizeof(*r)-3 && r->ResType==0 && r->AddrSpaceGranularity==32 &&
+      r->AddrTranslationOffset==0 && r->AddrRangeMin==bar &&
+      r->AddrLen==0x1000000 && bar && !(cfg[0x10/4]&0xfU) &&
+      (r->AddrRangeMax==(UINT64)bar+0xffffffU || r->AddrRangeMax==0xffffffU);
+    if(r && t->BootServices->FreePool(r)!=EFI_SUCCESS)valid=FALSE;
+    if(valid)ProbeBar(c,io,bar);else Problem(c,"bar0-resource",EFI_UNSUPPORTED);
   }
   if(hs)bs->FreePool(hs);
   Text(c,"probe targets=");Hex(c,found,4);End(c);
   ProbeGops(c);
-  if(root)ProbeDrivers(c,root);else Problem(c,"dump-volume",EFI_NOT_FOUND);
-  return found?EFI_SUCCESS:EFI_NOT_FOUND;
+  ProbeDrivers(c,root);
+  if(found!=1){Problem(c,"target-count",found?EFI_COMPROMISED_DATA:EFI_NOT_FOUND);}
+  return found==1?EFI_SUCCESS:found?EFI_COMPROMISED_DATA:EFI_NOT_FOUND;
 }

@@ -6,7 +6,9 @@ typedef struct {
   EFI_STATUS (*Prepare)(VOID *Context);
   EFI_STATUS (*Choose)(VOID *Context,BOOLEAN *Skip);
   EFI_STATUS (*Capture)(VOID *Context);
-  EFI_STATUS (*Release)(VOID *Context);
+  /* Starts TRUE. Release may clear it only after proving no effecting call
+   * was attempted, including calls that can partially mutate on error. */
+  EFI_STATUS (*Release)(VOID *Context,BOOLEAN *EffectAttempted);
   EFI_STATUS (*VerifyCold)(VOID *Context);
   EFI_STATUS (*Unlock)(VOID *Context);
   EFI_STATUS (*WindowsSkip)(VOID *Context);

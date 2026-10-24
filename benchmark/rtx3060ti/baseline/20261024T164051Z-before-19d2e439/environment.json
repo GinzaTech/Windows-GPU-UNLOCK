@@ -1,0 +1,97 @@
+{
+  "phase": "before",
+  "created_utc": "2026-10-24T16:40:51.573047+00:00",
+  "script_sha256": "557cdff46b3f83f5e1beb1eb55eb1e7479b71eddb397ba7b0baf323bda174c6b",
+  "python": "3.12.8",
+  "dll_sha256": {
+    "cudart64_12.dll": "3df50cf48718712f17b8c77ad72c45a1f43ff94781e302a4be7f1d7a9b66c746",
+    "cublas64_12.dll": "e26c6a52b7df762633978b282d6f172d0085719b116ff1a8ca4c96ff5786e142",
+    "cublasLt64_12.dll": "0fa3aabf2e90f0ba3d331699b95305ee29fe1cda0f4d4b64c883e04f01a35b49"
+  },
+  "gpu_name": "NVIDIA GeForce RTX 3060 Ti",
+  "gpu_pci_id": "0x248910DE",
+  "gpu_subsystem_id": "0x88271043",
+  "gpu_bus_id": "00000000:01:00.0",
+  "matrix_n": 4096,
+  "warmup_seconds": 2.0,
+  "samples_per_mode": 30,
+  "trials": 3,
+  "versions": {
+    "cuda_runtime": 12060,
+    "cuda_driver_api": 13040,
+    "cublas": 120600
+  },
+  "idle_samples": [
+    {
+      "name": "NVIDIA GeForce RTX 3060 Ti",
+      "pci.bus_id": "00000000:01:00.0",
+      "pci.device_id": "0x248910DE",
+      "pci.sub_device_id": "0x88271043",
+      "driver_version": "617.42",
+      "compute_cap": "8.6",
+      "power.limit": "200.00",
+      "power.draw": "52.28",
+      "clocks.current.sm": "1755",
+      "temperature.gpu": "42",
+      "memory.used": "1629",
+      "utilization.gpu": "6"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 3060 Ti",
+      "pci.bus_id": "00000000:01:00.0",
+      "pci.device_id": "0x248910DE",
+      "pci.sub_device_id": "0x88271043",
+      "driver_version": "617.42",
+      "compute_cap": "8.6",
+      "power.limit": "200.00",
+      "power.draw": "52.28",
+      "clocks.current.sm": "1755",
+      "temperature.gpu": "42",
+      "memory.used": "1629",
+      "utilization.gpu": "6"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 3060 Ti",
+      "pci.bus_id": "00000000:01:00.0",
+      "pci.device_id": "0x248910DE",
+      "pci.sub_device_id": "0x88271043",
+      "driver_version": "617.42",
+      "compute_cap": "8.6",
+      "power.limit": "200.00",
+      "power.draw": "52.28",
+      "clocks.current.sm": "1755",
+      "temperature.gpu": "43",
+      "memory.used": "1630",
+      "utilization.gpu": "4"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 3060 Ti",
+      "pci.bus_id": "00000000:01:00.0",
+      "pci.device_id": "0x248910DE",
+      "pci.sub_device_id": "0x88271043",
+      "driver_version": "617.42",
+      "compute_cap": "8.6",
+      "power.limit": "200.00",
+      "power.draw": "52.28",
+      "clocks.current.sm": "1755",
+      "temperature.gpu": "43",
+      "memory.used": "1630",
+      "utilization.gpu": "4"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 3060 Ti",
+      "pci.bus_id": "00000000:01:00.0",
+      "pci.device_id": "0x248910DE",
+      "pci.sub_device_id": "0x88271043",
+      "driver_version": "617.42",
+      "compute_cap": "8.6",
+      "power.limit": "200.00",
+      "power.draw": "52.35",
+      "clocks.current.sm": "1755",
+      "temperature.gpu": "42",
+      "memory.used": "1628",
+      "utilization.gpu": "7"
+    }
+  ],
+  "method": "cuBLAS 12.6 FP32 output, CUDA event timing, same GEMM modes as upstream"
+}

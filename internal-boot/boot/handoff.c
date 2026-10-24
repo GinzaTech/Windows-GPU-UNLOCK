@@ -7,7 +7,9 @@
 #include <Guid/FileInfo.h>
 #include "media.h"
 #include "flow.h"
-#ifdef GU_HEADLESS_RESEARCH
+#if defined(GU_DIAGNOSTIC_ONLY)
+/* The diagnostic has no unlock child or generated image contract. */
+#elif defined(GU_HEADLESS_RESEARCH)
 #include "build/headless/child-contract.h"
 #elif defined(GU_AUTOMATIC_BOOT)
 #include "build/automatic/child-contract.h"
@@ -17,6 +19,15 @@
 #include "../unlock/sha256.h"
 #ifdef GU_DIAGNOSTIC_ONLY
 #include "diagnostic.h"
+#ifdef GU_DIAGNOSTIC_PROBE
+#include "probe.h"
+#endif
+#ifdef GU_SELECTOR_TIMELINE
+#include "selector-timeline.h"
+#if defined(GU_DIAGNOSTIC_PROBE) || defined(GU_FULL_UNLOCK) || !defined(GU_PROFILE_Z690_3060TI)
+#error Selector timeline must be a separate read-only Z690 diagnostic image
+#endif
+#endif
 #endif
 #ifdef GU_CONSOLE_PREPARE
 #include "prepare-console.h"
@@ -32,6 +43,7 @@
 #include "diagnostic.h"
 #include "full-release.h"
 #include "full-flow.h"
+#include "../unlock/machine-profile.h"
 #if defined(GU_DIAGNOSTIC_ONLY) || defined(GU_CONSOLE_PREPARE)
 #error Full unlock and non-unlock experiments must remain separate builds
 #endif
@@ -70,8 +82,13 @@ static VOID ScreenStatus(const char *Event,EFI_STATUS Status) {
 static VOID Stop(VOID) {
   Say(L"\r\nHANDOFF STOPPED. No reset or automatic retry. Power off and use Windows Boot Manager for recovery.\r\n");
   if(Table && Table->BootServices) {
+#ifdef GU_DIAGNOSTIC_ONLY
+    if(Table->BootServices->SetWatchdogTimer(120,0,0,NULL)!=EFI_SUCCESS)
+      Say(L"WARNING: diagnostic watchdog could not be set.\r\n");
+#else
     if(Table->BootServices->SetWatchdogTimer(0,0,0,NULL)!=EFI_SUCCESS)
       Say(L"WARNING: firmware watchdog could not be disabled.\r\n");
+#endif
   }
   for(;;)__asm__ volatile("pause");
 }
@@ -132,7 +149,7 @@ static EFI_STATUS OpenLog(VOID) {
     CHAR16 name[]=L"\\RTX3090-UNLOCK\\PREP00.TXT";
 #endif
 #elif defined(GU_DIAGNOSTIC_ONLY)
-    CHAR16 name[]=L"\\RTX3090-UNLOCK\\DIAG00.TXT";
+    CHAR16 name[]=L"\\RTX3060TI-DIAG\\DIAG00.TXT";
 #else
     CHAR16 name[]=L"\\RTX3090-UNLOCK\\HANDOFF00.TXT";
 #endif
@@ -148,6 +165,9 @@ static EFI_STATUS OpenLog(VOID) {
     if(s==EFI_SUCCESS){if(existing)existing->Close(existing);continue;}
     if(s!=EFI_NOT_FOUND)return s;
     s=Root->Open(Root,&Log,name,EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE,0);
+#ifdef GU_DIAGNOSTIC_PROBE
+    if(s==EFI_SUCCESS && Log)GuProbeSetOutput(Root,i);
+#endif
     return s==EFI_SUCCESS && Log?EFI_SUCCESS:EFI_DEVICE_ERROR;
   }
   return EFI_VOLUME_FULL;
@@ -213,7 +233,11 @@ static EFI_STATUS Prepare(VOID *Context) {
   EFI_STATUS s=FindPartition(&GuInternalPartition,&own);
   if(s!=EFI_SUCCESS || own!=OwnDevice)return EFI_COMPROMISED_DATA;
   s=FindPartition(&GuWindowsPartition,&windows);
+#ifdef GU_DIAGNOSTIC_SAME_ESP
+  if(s!=EFI_SUCCESS || windows!=own)return EFI_COMPROMISED_DATA;
+#else
   if(s!=EFI_SUCCESS || windows==own)return EFI_COMPROMISED_DATA;
+#endif
   s=OpenLog();if(s!=EFI_SUCCESS)return s;
   s=Record(NULL,"internal-handoff-v1",EFI_SUCCESS);if(s!=EFI_SUCCESS)return s;
 #ifndef GU_DIAGNOSTIC_ONLY
@@ -269,12 +293,29 @@ static EFI_STATUS FullChoice(VOID *Context,BOOLEAN *Skip) {
   return EFI_SUCCESS;
 }
 static EFI_STATUS FullCapture(VOID *Context) {(void)Context;return GuCaptureGraph(Table,Log);}
-static EFI_STATUS FullRelease(VOID *Context) {
+static EFI_STATUS FullRelease(VOID *Context,BOOLEAN *EffectAttempted) {
+  if(!EffectAttempted)return EFI_INVALID_PARAMETER;
+  *EffectAttempted=TRUE; /* Fail closed until an exact pre-effect branch proves otherwise. */
 #ifdef GU_HEADLESS_RESEARCH
   ResearchOutputDisabled=TRUE;
 #endif
   (void)Context;EFI_STATUS s=GuPrepareConsole(Table,Record,NULL);
-  return s==EFI_SUCCESS?GuReleaseGop(Table,Self,Record,NULL):s;
+  if(s!=EFI_SUCCESS) {
+#if defined(GU_HEADLESS_RESEARCH) && defined(GU_PROFILE_Z690_3060TI) && GU_CONSOLE_AGGREGATE
+    /* Aggregate Stage2A has no compiled detach path on this exact board. */
+    *EffectAttempted=FALSE;
+    ResearchOutputDisabled=FALSE;
+#endif
+    return s;
+  }
+  s=GuReleaseGop(Table,Self,Record,NULL);
+#if defined(GU_HEADLESS_RESEARCH) && defined(GU_PROFILE_Z690_3060TI) && GU_CONSOLE_AGGREGATE
+  if(s!=EFI_SUCCESS && GuReleasePreflightFailed()) {
+    *EffectAttempted=FALSE;
+    ResearchOutputDisabled=FALSE;
+  }
+#endif
+  return s;
 }
 static EFI_STATUS FullVerifyCold(VOID *Context) {(void)Context;return GuVerifyReleased(Table,TRUE);}
 static EFI_STATUS ReportVerification(EFI_STATUS s) {
@@ -316,6 +357,11 @@ static EFI_STATUS Windows(VOID *Context) {
   Say(L"Starting Windows Boot Manager directly. No reset.\r\n");
   EFI_STATUS s=Log->Close(Log);Log=NULL;if(s!=EFI_SUCCESS)return s;
   s=Root->Close(Root);Root=NULL;if(s!=EFI_SUCCESS)return s;
+#ifdef GU_DIAGNOSTIC_ONLY
+  /* Keep a finite watchdog while reading the GPU, then hand it to Windows. */
+  s=Table->BootServices->SetWatchdogTimer(0,0,0,NULL);
+  if(s!=EFI_SUCCESS)return s;
+#endif
   return Table->BootServices->StartImage(WindowsImage,NULL,NULL);
 }
 #endif
@@ -365,7 +411,11 @@ static EFI_STATUS DetachConsole(VOID *Context) {
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   Table=St;Self=Image;
   if(!St || !St->BootServices)Stop();
+#ifdef GU_DIAGNOSTIC_ONLY
+  if(St->BootServices->SetWatchdogTimer(120,0,0,NULL)!=EFI_SUCCESS)return EFI_ABORTED;
+#else
   if(St->BootServices->SetWatchdogTimer(0,0,0,NULL)!=EFI_SUCCESS)Stop();
+#endif
   EFI_LOADED_IMAGE_PROTOCOL *loaded=NULL;
   EFI_STATUS s=St->BootServices->HandleProtocol(Image,&LoadedGuid,(VOID **)&loaded);
   if(s!=EFI_SUCCESS || !loaded)Stop();
@@ -377,10 +427,23 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE Image,EFI_SYSTEM_TABLE *St) {
   GU_CONSOLE_FLOW_OPS ops={NULL,Prepare,PrepareChoice,CaptureConsole,DetachConsole,ReadyConsoleWindows,VerifyConsole,StartConsoleWindows,Record};
   s=GuConsoleFlow(&ops);
 #elif defined(GU_DIAGNOSTIC_ONLY)
+#ifdef GU_SELECTOR_TIMELINE
+  Say(L"RTX 3060 Ti read-only selector timeline. Collecting samples, then Windows...\r\n");
+#else
   Say(L"GPU console diagnostic only. No unlock or driver detach. Collecting graph...\r\n");
+#endif
   s=Prepare(NULL);
   if(s==EFI_SUCCESS) {
+#ifdef GU_SELECTOR_TIMELINE
+    EFI_STATUS timeline=GuSelectorTimelineBegin(Table,Log);
+    if(timeline==EFI_SUCCESS)timeline=GuSelectorTimelineWait(Table,Log);
+    EFI_STATUS graph=timeline==EFI_SUCCESS?GuCaptureGraph(Table,Log):EFI_NOT_READY;
+    EFI_STATUS late=timeline==EFI_SUCCESS?GuSelectorTimelineSample(Log,"post-graph"):EFI_NOT_READY;
+    EFI_STATUS prom=timeline==EFI_SUCCESS && late==EFI_SUCCESS?GuSelectorTimelineProm(Table,Log):EFI_NOT_READY;
+    s=timeline!=EFI_SUCCESS?timeline:graph!=EFI_SUCCESS?graph:late!=EFI_SUCCESS?late:prom;
+#else
     s=GuCaptureGraph(Table,Log);
+#endif
     /* Partial observations never authorize unlock. Normal Windows boot is
      * permitted because this separate image has not touched GPU state. */
     EFI_STATUS recorded=Record(NULL,"diagnostic-result",s);

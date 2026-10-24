@@ -2,6 +2,8 @@
 #pragma once
 #include "prepare-console.h"
 EFI_STATUS GuReleaseGop(EFI_SYSTEM_TABLE *Table,EFI_HANDLE Image,GU_PREPARE_LOG Log,VOID *Context);
+/* True only when GuReleaseGop returned before its first effecting operation. */
+BOOLEAN GuReleasePreflightFailed(VOID);
 EFI_STATUS GuVerifyReleased(EFI_SYSTEM_TABLE *Table,BOOLEAN CheckCold);
 typedef struct {
   const char *Stage;

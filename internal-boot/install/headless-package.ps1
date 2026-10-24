@@ -6,7 +6,16 @@ function Get-HeadlessInputInventory([string]$Repo,[switch]$WithContract){
  $paths+=Get-ChildItem -LiteralPath (Join-Path $base 'deps/edk2/MdePkg/Include') -Recurse -File -Filter '*.h'
  $paths+=Get-Item -LiteralPath (Join-Path $base 'internal-boot/local-config.json'),(Join-Path $base 'internal-boot/unlock/assets.json'),(Join-Path $base 'research/headless/build-unlock.ps1')
  if($WithContract){$paths+=Get-Item -LiteralPath (Join-Path $base 'internal-boot/boot/build/headless/child-contract.h')}
- return @($paths | Sort-Object FullName -Unique | ForEach-Object {[ordered]@{Path=$_.FullName.Substring($base.Length+1).Replace([char]92,[char]47);Sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant()}})
+ # Sort by .NET ordinal rules so Windows PowerShell 5.1 and PowerShell 7
+ # produce the same signed input order regardless of their culture collator.
+ $byPath=@{}
+ foreach($file in $paths){$byPath[$file.FullName]=$file}
+ [string[]]$sorted=@($byPath.Keys)
+ [Array]::Sort($sorted,[StringComparer]::OrdinalIgnoreCase)
+ return @($sorted | ForEach-Object {
+  $file=$byPath[$_]
+  [ordered]@{Path=$file.FullName.Substring($base.Length+1).Replace([char]92,[char]47);Sha256=(Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant()}
+ })
 }
 function Get-HeadlessGuidInitializer([guid]$Value){
  $b=$Value.ToByteArray();$tail=($b[8..15] | ForEach-Object {'0x{0:x2}' -f $_}) -join ','
@@ -24,13 +33,14 @@ function Get-HeadlessProfileIdentity([string]$Profile){
  switch($Profile){
   'ASUS-TUF-B650M-PLUS-WIFI-3057-RTX3090-FE'{return @{Board='TUF GAMING B650M-PLUS WIFI';Bios='3057'}}
   'ASUS-TUF-GAMING-B660M-E-D4-4003-RTX3070TI'{return @{Board='TUF GAMING B660M-E D4';Bios='4003'}}
+  'ASUS-TUF-GAMING-Z690-PLUS-WIFI-D4-2602-RTX3060TI'{return @{Board='TUF GAMING Z690-PLUS WIFI D4';Bios='2602'}}
  }
  throw ('Unknown hardware profile: '+$Profile)
 }
 function Assert-HeadlessPackage([string]$Repo){
  $null=Assert-HeadlessLocalConfig $Repo
  $m=Get-Content -LiteralPath (Join-Path $Repo 'internal-boot/boot/build/headless/manifest.json') -Raw | ConvertFrom-Json
- if($m.Format -ne 2 -or $m.Mode -ne 'single-rtx-headless-unlock-then-windows' -or $m.CanUnlock -ne $true -or $m.RequiresHumanKey -ne $false -or $m.HardwareProfile -notin @('ASUS-TUF-B650M-PLUS-WIFI-3057-RTX3090-FE','ASUS-TUF-GAMING-B660M-E-D4-4003-RTX3070TI')){throw 'Unexpected headless package profile'}
+ if($m.Format -ne 2 -or $m.Mode -ne 'single-rtx-headless-unlock-then-windows' -or $m.CanUnlock -ne $true -or $m.RequiresHumanKey -ne $false -or $m.HardwareProfile -notin @('ASUS-TUF-B650M-PLUS-WIFI-3057-RTX3090-FE','ASUS-TUF-GAMING-B660M-E-D4-4003-RTX3070TI','ASUS-TUF-GAMING-Z690-PLUS-WIFI-D4-2602-RTX3060TI')){throw 'Unexpected headless package profile'}
  $actual=Get-HeadlessInputInventory $Repo -WithContract
  if($actual.Count -ne $m.Inputs.Count){throw 'Build source set changed; rebuild the package'}
  for($i=0;$i -lt $actual.Count;$i++){if($actual[$i].Path -cne $m.Inputs[$i].Path -or $actual[$i].Sha256 -ne $m.Inputs[$i].Sha256){throw ('Build input changed; rebuild: '+$actual[$i].Path)}}

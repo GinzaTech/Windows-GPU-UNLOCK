@@ -32,13 +32,19 @@ if($RestoreWindowsFirst){
  # Recovery is independent of EFI, configuration, build outputs and ESP presence.
  $s=$null
  if(Test-Path -LiteralPath $stateFile){try{$s=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json}catch{Write-Warning 'Saved state unreadable; Windows-first recovery still proceeds, but previous Fast Startup setting is unavailable'}}
- $order=Order (Bcd @('/enum','{fwbootmgr}'))
+ $beforeFw=Bcd @('/enum','{fwbootmgr}')
+ $order=Order $beforeFw
+ $pendingBootNext=$beforeFw -match '(?mi)^bootsequence\s+'
  Invoke-RecoveryActions -Actions @(
   {SetOrder (@('{bootmgr}')+@($order | Where-Object {$_ -ne '{bootmgr}'}))},
+  {if($pendingBootNext){[void](Bcd @('/deletevalue','{fwbootmgr}','bootsequence'))}},
   {if($s -and $s.HiberbootBefore){SetHiber $s.HiberbootBefore}},
   {if($s){$s.Mode='windows-first';SaveState $s}}
  )
- if((Order (Bcd @('/enum','{fwbootmgr}')))[0] -ne '{bootmgr}'){throw 'Windows-first recovery verification failed'}
+ $recoveredFw=Bcd @('/enum','{fwbootmgr}')
+ if((Order $recoveredFw)[0] -ne '{bootmgr}' -or $recoveredFw -match '(?mi)^bootsequence\s+'){
+  throw 'Windows-first recovery verification failed'
+ }
  Write-Output 'Windows first restored. Existing entries and files retained; no reboot.';return
 }
 if($EnableAutomatic -and !$ConfirmedSuccess){throw 'First verify headless unlock, Windows display recovery and Tensor performance; then pass -ConfirmedSuccess'}
@@ -56,9 +62,10 @@ function Target {
  return $v.Path
 }
 $root=Target
-if(Confirm-SecureBootUEFI){throw 'This unsigned experimental EFI requires Secure Boot disabled'}
-$enc=Get-BitLockerVolume -MountPoint C:
-if([int]$enc.VolumeStatus -ne 0 -or [int]$enc.ProtectionStatus -ne 0){throw 'C: must be fully decrypted and protection off; this tool never changes encryption settings'}
+$secureBoot=Confirm-SecureBootUEFI
+if($null -eq $secureBoot -or $secureBoot -ne $false){throw 'This unsigned experimental EFI requires Secure Boot disabled'}
+$enc=@(Get-BitLockerVolume -MountPoint C:)
+if($enc.Count -ne 1 -or $null -eq $enc[0].VolumeStatus -or $null -eq $enc[0].ProtectionStatus -or [int]$enc[0].VolumeStatus -ne 0 -or [int]$enc[0].ProtectionStatus -ne 0){throw 'C: must be fully decrypted and protection off; this tool never changes encryption settings'}
 $child='unlock/build/experimental/entryLatchedSs1Full/internal/automatic/headless-research/RTX3090-EXPERIMENTAL-entryLatchedSs1Full-INTERNAL-AUTO-HEADLESS-RESEARCH.EFI'
 $artifacts=@(
  @('boot/build/headless/HEADLESS.EFI','EFI\WindowsGPUUnlock\HEADLESS.EFI',$package.EfiSha256),
@@ -89,13 +96,36 @@ CheckStaged
 if(!$Register -and !$EnableAutomatic){Write-Output 'Headless files staged and verified only. Boot settings unchanged.';return}
 $fw=Bcd @('/enum','{fwbootmgr}');$order=Order $fw;$firmware=Bcd @('/enum','firmware')
 if($fw -match '(?mi)^bootsequence\s+'){throw 'Pending BootNext; refuse to change boot configuration'}
+if($Register -and $order[0] -ne '{bootmgr}') {throw 'Windows Boot Manager must be first before an untested F8 registration'}
 $existing=@{};foreach($id in $order){$existing[$id]=Bcd @('/enum',$id)}
 $backup=Join-Path $env:ProgramData ('WindowsGPUUnlock\HeadlessBackups\'+(Get-Date -Format 'yyyyMMdd-HHmmssfff'))
 [void][IO.Directory]::CreateDirectory($backup);[void](Bcd @('/export',(Join-Path $backup 'BCD-export')))
 [IO.File]::WriteAllText((Join-Path $backup 'firmware-before.txt'),$firmware)
 function CheckUnchanged([string]$except){foreach($id in $existing.Keys){if($id -ne $except -and (Bcd @('/enum',$id)) -cne $existing[$id]){throw 'Unrelated boot entry changed'}}}
+function CheckEntryPartition([string]$text){
+ $m=[regex]::Match($text,'(?mi)^device\s+partition=(\S+)\s*$')
+ if(!$m.Success){throw 'Headless entry partition device is missing'}
+ $device=$m.Groups[1].Value
+ if($device -ieq ($config.UnlockDriveLetter+':')){return}
+ $p=Get-Partition -DriveLetter $config.UnlockDriveLetter
+ $disk=Get-Disk -Number $p.DiskNumber
+ if($p.Guid -ne $config.UnlockPartitionGuid -or $p.Offset -ne $config.UnlockOffset -or
+    $p.Size -ne $config.UnlockSize -or $disk.UniqueId -ne $config.UnlockDiskUniqueId){throw 'Unlock partition changed'}
+ $volumePath=@($p.AccessPaths | Where-Object {$_ -match '^\\\\\?\\Volume\{[0-9a-f-]{36}\}\\$'})
+ if($volumePath.Count -ne 1){throw 'Unlock volume GUID path is unavailable'}
+ if($device -ieq $volumePath[0] -or $device -ieq $volumePath[0].TrimEnd([char]92)){return}
+ if($device -notmatch '^\\Device\\HarddiskVolume[0-9]+$'){throw 'Headless entry points to an unexpected partition device'}
+ $rows=@(& fltmc.exe volumes 2>&1)
+ if($LASTEXITCODE -ne 0){throw 'Could not verify the unlock ESP NT device'}
+ $found=@($rows | ForEach-Object {
+  $r=[regex]::Match($_,('(?i)^\s*'+[regex]::Escape($config.UnlockDriveLetter+':')+'\s+(\\Device\\HarddiskVolume[0-9]+)(?:\s|$)'))
+  if($r.Success){$r.Groups[1].Value}
+ })
+ if($found.Count -ne 1 -or $device -ine $found[0]){throw 'Headless entry partition differs from the unlock ESP'}
+}
 function CheckEntry([string]$text){
- if($text -notmatch ('(?mi)^device\s+partition='+[regex]::Escape($config.UnlockDriveLetter)+':\s*$') -or $text -notmatch ('(?mi)^path\s+'+[regex]::Escape($entryPath)+'\s*$') -or $text -notmatch ('(?m)^description\s+'+[regex]::Escape($entryName)+'\s*$')){throw 'Headless entry identity mismatch'}
+ CheckEntryPartition $text
+ if($text -notmatch ('(?mi)^path\s+'+[regex]::Escape($entryPath)+'\s*$') -or $text -notmatch ('(?m)^description\s+'+[regex]::Escape($entryName)+'\s*$')){throw 'Headless entry identity mismatch'}
 }
 if($Register){
  if(Test-Path -LiteralPath $stateFile){throw 'Headless registration state already exists'}
@@ -115,6 +145,7 @@ if($Register){
   {SetOrder (@($order)+@($reg.Id))}
  ) -Verify {
   if(((Order (Bcd @('/enum','{fwbootmgr}'))) -join ',') -cne ((@($order)+@($reg.Id)) -join ',')){throw 'Registration order mismatch'}
+  if((Order (Bcd @('/enum','{fwbootmgr}')))[0] -ne '{bootmgr}'){throw 'Windows Boot Manager is not first after registration'}
   if((Bcd @('/enum','{fwbootmgr}')) -match '(?mi)^bootsequence\s+'){throw 'BootNext changed'}
   CheckEntry (Bcd @('/enum',$reg.Id));CheckUnchanged '';CheckStaged
   $s.Mode='registered';SaveState $s
