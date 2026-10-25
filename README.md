@@ -16,6 +16,12 @@ CUDA before/after measurements. Other 3060 Ti machines can run the read-only
 compatibility plan, but cannot install this exact profile without separate
 hardware validation.
 
+For a local GPU readout and a self-run compute benchmark, double-click
+[Run-Benchmark.cmd](benchmark/rtx3060ti/Run-Benchmark.cmd). See the
+[English guide](benchmark/rtx3060ti/README.en.md) or
+[Vietnamese guide](benchmark/rtx3060ti/README.vi.md). The measurement harness
+currently pins the specific test card's PCI, subsystem, and bus IDs.
+
 The following sections describe the original **RTX 3090 Founders Edition / ASUS
 BIOS 3057** path. v0.3.1 is the earlier source-only pre-release for that path.
 

@@ -53,6 +53,8 @@ python .\benchmark\rtx3060ti\measure.py --phase before
 
 Giữ nguyên file `measure.py`, thư viện CUDA, driver, giới hạn điện, độ phân giải và điều kiện tải nền giữa hai lượt đo. Phép đo trước tạo `benchmark/results/rtx3060ti/<thời gian>-before-.../summary.json`.
 
+Muốn chạy bằng menu và xem TFLOPS, điện, nhiệt độ, xung ngay trên màn hình, nhấp đúp [`benchmark/rtx3060ti/Run-Benchmark.cmd`](../benchmark/rtx3060ti/Run-Benchmark.cmd). Xem [hướng dẫn sử dụng benchmark](../benchmark/rtx3060ti/README.vi.md).
+
 ## Kiểm tra kế hoạch và cài
 
 Ví dụ dưới đây dùng ESP riêng `U:` và LLVM trong `PATH`:

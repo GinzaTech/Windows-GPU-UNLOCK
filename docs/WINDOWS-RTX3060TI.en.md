@@ -53,6 +53,8 @@ python .\benchmark\rtx3060ti\measure.py --phase before
 
 Keep `measure.py`, CUDA libraries, driver, power limit, resolution, and background load comparable between runs. The baseline produces `benchmark/results/rtx3060ti/<timestamp>-before-.../summary.json`.
 
+To use a menu that displays TFLOPS, power, temperature and clocks, double-click [`benchmark/rtx3060ti/Run-Benchmark.cmd`](../benchmark/rtx3060ti/Run-Benchmark.cmd). See the [benchmark launcher guide](../benchmark/rtx3060ti/README.en.md).
+
 ## Plan and install
 
 This example uses the separate `U:` ESP and LLVM tools in `PATH`:
